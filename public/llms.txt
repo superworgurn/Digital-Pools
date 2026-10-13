@@ -1,0 +1,31 @@
+﻿# Digital Pools — Smart Aquatics Platform
+
+> Interactive 3D Digital Twin & Aquatic Center Management Platform สำหรับบริหารจัดการสระว่ายน้ำอัจฉริยะและการแสดงผล Telemetry แบบ Real-time
+
+## ภาพรวมโปรเจกต์ (Project Overview)
+Digital Pools คือแพลตฟอร์มบริหารจัดการและระบบฝาแฝดดิจิทัล (Digital Twin) สำหรับศูนย์กีฬาทางน้ำและสระว่ายน้ำ พัฒนาบนเว็บเทคโนโลยีสมัยใหม่ รองรับการจำลองพฤติกรรมคน (NPC Agents), การตรวจวัดคุณภาพน้ำ IoT, ระบบจองรอบและเช็คอิน รวมถึงโหมดเดินสำรวจ 3D แบบบุคคลที่หนึ่ง (First-Person Walkthrough)
+
+## ฟีเจอร์หลัก (Key Features)
+- **3D Digital Twin Canvas**: แสดงผลโมเดลสระว่ายน้ำหลัก, สระเด็กพร้อมสไลเดอร์และน้ำพุเห็ด, ตู้ล็อกเกอร์, ป้อมไลฟ์การ์ด, และร้านสะดวกซื้อ 7-Eleven
+- **First-Person Player Mode**: โหมดเดินสำรวจเสมือนจริง ควบคุมทิศทางด้วยปุ่ม WASD, ปุ่ม Shift วิ่งเร็ว, และ Touchscreen D-Pad บนมือถือ พร้อมระบบตรวจจับการชน (Collision Detection)
+- **IoT Water Quality Telemetry**: หน้าต่างแสดงผลเซนเซอร์ตรวจวัดคุณภาพน้ำแบบ Real-time (pH, คลอรีนอิสระ, อุณหภูมิ, ORP, Turbidity, TDS)
+- **Check-in & Booking System**: 
+  - ระบบจองรอบว่ายน้ำล่วงหน้า (Morning, Afternoon, Night Slot)
+  - ระบบเช็คอินหน้าเคาน์เตอร์ ระบุจำนวนสมาชิก (Party Size)
+  - รองรับการแก้ไขจำนวนคนหรือยกเลิกรายการได้ตราบใดที่ยังไม่ได้ชำระเงิน และล็อกสิทธิ์ทันทีหลังชำระเงิน
+- **Swimming Class Registration**: ฟอร์มลงทะเบียนคอร์สเรียนว่ายน้ำ คำนวณราคารวมอัตโนมัติ พร้อมระบบจัดการการสมัคร
+- **Emergency Action Response**: ระบบกดสัญญาณแจ้งเหตุฉุกเฉิน ไซเรนป้อมทำงาน และไลฟ์การ์ดลงมาเดินตรวจการณ์กู้ภัยริมสระน้ำ
+- **Executive Manager Dashboard**: แดชบอร์ดสรุปภาพรวมรายวัน รายสัปดาห์ และรายเดือน (วิเคราะห์ช่วงเวลาคนเล่นหนาแน่น Peak/Off-Peak, สถิติคุณภาพน้ำ และสัดส่วนรายได้) เฉพาะสิทธิ์ Admin
+
+## โครงสร้างเทคโนโลยี (Tech Stack)
+- **Framework**: Svelte 5 / TypeScript
+- **Bundler & Tooling**: Vite
+- **Styling**: Tailwind CSS
+- **3D Rendering**: Custom Canvas 2D/3D Projection Engine with Z-sorting
+- **State Management**: Svelte Reactive Stores
+- **Icons**: Lucide Svelte
+
+## การเข้าถึงและสิทธิ์การใช้งาน (Role-Based Access)
+- **Guest (ยังไม่ล็อกอิน)**: สามารถเปิดดูโมเดล 3D, เดินสำรวจ และคลิกดูรายละเอียดจุดต่างๆ ได้ แต่ไม่สามารถทำรายการจอง สมัคร หรือกดฉุกเฉินได้
+- **User (สมาชิก)**: ล็อกอินเพื่อจองรอบ เช็คอิน สมัครคอร์ส และใช้งานระบบทั่วไป
+- **Admin (ผู้ดูแลระบบ)**: สิทธิ์การเข้าถึงเต็มรูปแบบ รวมถึงปุ่มเปิดดู Executive Manager Dashboard

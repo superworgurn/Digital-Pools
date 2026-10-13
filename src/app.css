@@ -1,0 +1,70 @@
+﻿@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', 'Noto Sans Thai', system-ui, sans-serif;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background-color: #0b1220;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.glass {
+  background: linear-gradient(180deg, rgba(15,23,42,.92), rgba(15,23,42,.82));
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid rgba(125,211,252,.18);
+  box-shadow: 0 24px 70px -22px rgba(0,0,0,.9);
+}
+
+.glass-soft {
+  background: rgba(15,23,42,.66);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(125,211,252,.16);
+  box-shadow: 0 12px 34px -14px rgba(0,0,0,.8);
+}
+
+.gradient-text {
+  background: linear-gradient(92deg, #67e8f9, #38bdf8 45%, #a78bfa);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.scanline {
+  position: absolute;
+  left: 6%; right: 6%;
+  height: 3px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, transparent, #22d3ee, transparent);
+  box-shadow: 0 0 14px 3px rgba(34,211,238,.7);
+  animation: scanMove 2.1s ease-in-out infinite;
+}
+
+@keyframes scanMove {
+  0%, 100% { top: 12%; }
+  50% { top: 86%; }
+}
+
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .45; transform: scale(.82); }
+}
+
+.live-dot {
+  animation: livePulse 1.6s ease-in-out infinite;
+}
+
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+.float-anim {
+  animation: floatY 3s ease-in-out infinite;
+}
