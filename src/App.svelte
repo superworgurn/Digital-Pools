@@ -2,96 +2,117 @@
   import { onMount } from 'svelte';
   import Navbar from './lib/components/Navbar.svelte';
   import Scene3D from './lib/components/Scene3D.svelte';
-  import ToastContainer from './lib/components/ToastContainer.svelte';
-  import LoginPage from './lib/components/LoginPage.svelte';
   import HotspotModal from './lib/components/HotspotModal.svelte';
   import ManagerDrawer from './lib/components/ManagerDrawer.svelte';
+  import LoginPage from './lib/components/LoginPage.svelte';
+  import ToastContainer from './lib/components/ToastContainer.svelte';
   import {
-    activeModal, activeModalTab, prefillCheckin, isDrawerOpen,
-    currentUser, isLoginModalOpen, isEmergency, addToast
+    currentUser,
+    isLoginModalOpen,
+    activeHotspot,
+    isManagerDrawerOpen,
+    isExplorationMode
   } from './lib/stores';
-  import { BarChart3 } from 'lucide-svelte';
+  import type { HotspotId } from './types';
 
-  let sceneComponent: Scene3D;
+  let mounted = false;
 
-  function handleViewChange(e: CustomEvent<string>) {
-    sceneComponent?.changeView(e.detail);
+  // ซิงค์พารามิเตอร์ลงบน URL อัตโนมัติเมื่อมีการเปิด/ปิดหน้าต่าง หรือเปลี่ยนโหมดเดินสำรวจ
+  $: if (mounted && typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
+
+    if ($activeHotspot && $activeHotspot !== 'seven-eleven') {
+      url.searchParams.set('modal', $activeHotspot);
+    } else {
+      url.searchParams.delete('modal');
+      url.searchParams.delete('open');
+    }
+
+    if ($isExplorationMode) {
+      url.searchParams.set('player', 'true');
+    } else {
+      url.searchParams.delete('player');
+    }
+
+    window.history.replaceState({}, '', url.toString());
   }
 
-  // 🔗 ตรวจจับ URL Parameters เมื่อเปิดลิงก์มาจาก LINE OA
   onMount(() => {
     const params = new URLSearchParams(window.location.search);
 
-    // 1. ตรวจจับการล็อกอินด่วนด้วย role เช่น ?role=admin หรือ ?role=user
+    // 1. สิทธิ์การใช้งาน (?role=admin หรือ ?role=user)
     const roleParam = params.get('role');
     if (roleParam === 'admin') {
-      currentUser.set({ username: 'admin', name: 'ผู้จัดการฝ่ายปฏิบัติการ (Admin)', role: 'admin' });
-    } else if (roleParam === 'user') {
-      currentUser.set({ username: 'user', name: 'สมาชิกสระว่ายน้ำ (Member User)', role: 'user' });
+      currentUser.set({
+        username: 'admin',
+        name: 'ผู้จัดการสระ (Admin)',
+        displayName: 'ผู้จัดการสระ (Admin)',
+        role: 'admin'
+      });
+    } else {
+      currentUser.set({
+        username: 'user',
+        name: 'สมาชิกสระว่ายน้ำ (Member User)',
+        displayName: 'สมาชิกสระว่ายน้ำ (Member User)',
+        role: 'user'
+      });
     }
 
-    // 2. ตรวจจับการเปิดหน้า Login เช่น ?login=true
+    // 2. เปิดหน้า Login (?login=true)
     if (params.get('login') === 'true') {
       isLoginModalOpen.set(true);
     }
 
-    // 3. ตรวจจับการเปิดสัญญาณฉุกเฉิน เช่น ?emergency=true
+    // 3. สัญญาณฉุกเฉิน (?emergency=true)
     if (params.get('emergency') === 'true') {
-      isEmergency.set(true);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('dp-lifeguard-emergency'));
+      }, 500);
     }
 
-    // 4. ตรวจจับการเปิด Modal และ Tab ย่อย เช่น ?modal=reception&tab=checkin
+    // 4. เปิดหน้าต่างบริการ (?modal=swimwear | checkin | locker | courses | restroom | water | lifeguard | kids-pool)
     const modalParam = params.get('modal') || params.get('open');
-    const tabParam = params.get('tab');
     if (modalParam) {
-      activeModal.set(modalParam);
-      if (tabParam) activeModalTab.set(tabParam);
+      const validHotspots: HotspotId[] = [
+        'checkin',
+        'locker',
+        'courses',
+        'swimwear',
+        'restroom',
+        'water',
+        'lifeguard',
+        'kids-pool'
+      ];
+      if (validHotspots.includes(modalParam as HotspotId)) {
+        activeHotspot.set(modalParam as HotspotId);
+      } else if (modalParam === 'reception') {
+        activeHotspot.set('checkin');
+      }
     }
 
-    // 5. เติมข้อมูลรหัส/ชื่ออัตโนมัติจาก LINE OA เช่น ?code=LINE1234&name=Somchai
-    const codeParam = params.get('code');
-    const nameParam = params.get('name');
-    if (codeParam || nameParam) {
-      prefillCheckin.set({ code: codeParam || '', name: nameParam || '' });
-    }
-
-    // 6. ตรวจจับการปรับมุมมองกล้องหรือเปิดโหมดเดินสำรวจ
-    const viewParam = params.get('view');
+    // 5. โหมดเดินสำรวจ (?player=true)
     const isPlayerParam = params.get('player') === 'true' || params.get('mode') === 'player';
+    if (isPlayerParam) {
+      isExplorationMode.set(true);
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('dp-toggle-exploration', { detail: true }));
+      }, 450);
+    }
 
-    // หน่วงเวลาเล็กน้อยเพื่อให้ 3D Engine โหลดฐานข้อมูลครบก่อนสั่งงาน
-    setTimeout(() => {
-      if (viewParam) {
-        sceneComponent?.changeView(viewParam);
-      }
-      if (isPlayerParam) {
-        sceneComponent?.setPlayerMode(true);
-      }
-    }, 450);
+    // 6. แดชบอร์ดผู้จัดการ (?dashboard=true)
+    if (params.get('dashboard') === 'true') {
+      isManagerDrawerOpen.set(true);
+    }
+
+    mounted = true;
   });
 </script>
 
-<main class="relative w-screen h-screen overflow-hidden bg-[#0b1220]">
-  <Scene3D bind:this={sceneComponent} />
-  <Navbar on:changeView={handleViewChange} />
-
-  {#if $currentUser?.role === 'admin'}
-    <button
-      class="fixed bottom-4 right-4 z-30 flex items-center gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-cyan-500 to-sky-600 text-slate-900 font-bold text-xs shadow-xl shadow-cyan-500/30 hover:scale-105 active:scale-95 transition cursor-pointer"
-      on:click={() => isDrawerOpen.set(true)}
-    >
-      <BarChart3 class="w-4 h-4" />
-      <span class="hidden sm:inline">Manager Dashboard</span>
-    </button>
-  {/if}
-
-  {#if $activeModal}
-    <HotspotModal modalId={$activeModal} />
-  {/if}
-
-  {#if $isDrawerOpen && $currentUser?.role === 'admin'}
-    <ManagerDrawer />
-  {/if}
+<main class="relative w-screen h-screen overflow-hidden bg-sky-300 text-slate-100">
+  <Navbar />
+  <Scene3D />
+  <HotspotModal />
+  <ManagerDrawer />
 
   {#if $isLoginModalOpen}
     <LoginPage />

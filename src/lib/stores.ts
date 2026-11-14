@@ -1,276 +1,308 @@
-﻿import { writable } from 'svelte/store';
-import type { ToastMessage } from '../types';
+﻿import { writable, derived } from 'svelte/store';
+import type {
+  UserProfile,
+  HotspotId,
+  PoolMetrics,
+  LockerItem,
+  BookingItem,
+  CourseRegistration,
+  SwimsuitCatalogItem,
+  SwimsuitOrder,
+  SwimsuitSize,
+  ToastMessage
+} from '../types';
 
-export interface UserProfile {
-  username: string;
-  name: string;
-  role: 'admin' | 'user';
-}
+export const BRAND_LOGO_IMAGE_URL = '/logo.png';
+export const PAYMENT_QR_IMAGE_URL = '/my-qrcode.png';
 
-export interface Booking {
-  id: string;
-  slotId: string;
-  slotName: string;
-  dateIdx: number;
-  dateLabel: string;
-  memberCount: number;
-  pricePerPerson: number;
-  totalPrice: number;
-  status: 'unpaid' | 'paid' | 'cancelled';
-  placed: string;
-}
+export const SIZE_PRICE_MODIFIERS: Record<
+  SwimsuitSize,
+  { label: string; chest: string; extraRent: number; extraBuy: number }
+> = {
+  KIDS: { label: 'KIDS (เด็ก)', chest: '22-26"', extraRent: -20, extraBuy: -50 },
+  XS: { label: 'XS', chest: '30-32"', extraRent: 0, extraBuy: 0 },
+  S: { label: 'S', chest: '32-34"', extraRent: 0, extraBuy: 0 },
+  M: { label: 'M', chest: '34-36"', extraRent: 0, extraBuy: 0 },
+  L: { label: 'L', chest: '36-38"', extraRent: 10, extraBuy: 30 },
+  XL: { label: 'XL', chest: '38-41"', extraRent: 20, extraBuy: 50 },
+  XXL: { label: 'XXL', chest: '42-45"', extraRent: 30, extraBuy: 80 },
+  '2XL': { label: '2XL (Plus)', chest: '42-45"', extraRent: 30, extraBuy: 80 }
+};
 
-export interface ClassRegistration {
-  id: string;
-  classIdx: number;
-  className: string;
-  coach: string;
-  time: string;
-  pricePerPerson: number;
-  memberCount: number;
-  totalPrice: number;
-  status: 'unpaid' | 'paid';
-  registeredAt: string;
-}
+export const SWIMSUIT_CATALOG = writable<SwimsuitCatalogItem[]>([
+  {
+    id: 'suit-men-pro',
+    name: 'กางเกงว่ายน้ำชาย Pro Jammer',
+    nameTH: 'กางเกงว่ายน้ำชาย Pro Jammer',
+    category: 'men',
+    rentPrice: 80,
+    buyPrice: 450,
+    depositPrice: 100,
+    colorHex: '#0284c7',
+    colorNumber: 0x0284c7,
+    icon: '🩳',
+    description: 'ผ้า Spandex กันคลอรีน กระชับกล้ามเนื้อ แห้งไว',
+    available: true,
+    availableColors: [
+      { colorId: 'blue', colorName: 'สีฟ้าสมุทร', colorHex: '#0284c7', colorNumber: 0x0284c7 },
+      { colorId: 'dark', colorName: 'สีดำเข้ม', colorHex: '#0f172a', colorNumber: 0x0f172a },
+      { colorId: 'teal', colorName: 'สีเขียวเทล', colorHex: '#0d9488', colorNumber: 0x0d9488 }
+    ],
+    rentStock: { KIDS: 5, XS: 8, S: 12, M: 15, L: 14, XL: 10, XXL: 6, '2XL': 6 },
+    buyStock: { KIDS: 3, XS: 5, S: 10, M: 12, L: 8, XL: 6, XXL: 4, '2XL': 4 }
+  },
+  {
+    id: 'suit-women-onepiece',
+    name: 'ชุดว่ายน้ำหญิง One-Piece Sport',
+    nameTH: 'ชุดว่ายน้ำหญิง One-Piece Sport',
+    category: 'women',
+    rentPrice: 120,
+    buyPrice: 690,
+    depositPrice: 150,
+    colorHex: '#db2777',
+    colorNumber: 0xdb2777,
+    icon: '🩱',
+    description: 'ดีไซน์สปอร์ตคล่องตัว ซับในเต็มตัว กัน UV UPF 50+',
+    available: true,
+    availableColors: [
+      { colorId: 'pink', colorName: 'สีชมพูมาเจนตา', colorHex: '#db2777', colorNumber: 0xdb2777 },
+      { colorId: 'purple', colorName: 'สีม่วงลาเวนเดอร์', colorHex: '#9333ea', colorNumber: 0x9333ea },
+      { colorId: 'navy', colorName: 'สีน้ำเงินกรมท่า', colorHex: '#1e3a8a', colorNumber: 0x1e3a8a }
+    ],
+    rentStock: { KIDS: 4, XS: 10, S: 14, M: 16, L: 12, XL: 8, XXL: 5, '2XL': 5 },
+    buyStock: { KIDS: 2, XS: 6, S: 8, M: 10, L: 7, XL: 5, XXL: 3, '2XL': 3 }
+  },
+  {
+    id: 'suit-rashguard-uv',
+    name: 'ชุดว่ายน้ำแขนยาว Rashguard Set (Unisex)',
+    nameTH: 'ชุดว่ายน้ำแขนยาว Rashguard Set (Unisex)',
+    category: 'unisex',
+    rentPrice: 150,
+    buyPrice: 890,
+    depositPrice: 150,
+    colorHex: '#0d9488',
+    colorNumber: 0x0d9488,
+    icon: '👕',
+    description: 'เสื้อแขนยาวพร้อมกางเกงขายาว กันแดดและรักษาอุณหภูมิร่างกาย',
+    available: true,
+    availableColors: [
+      { colorId: 'teal', colorName: 'สีเขียวเทล', colorHex: '#0d9488', colorNumber: 0x0d9488 },
+      { colorId: 'blue', colorName: 'สีฟ้าโอเชียน', colorHex: '#0284c7', colorNumber: 0x0284c7 },
+      { colorId: 'dark', colorName: 'สีดำสปอร์ต', colorHex: '#1e293b', colorNumber: 0x1e293b }
+    ],
+    rentStock: { KIDS: 8, XS: 10, S: 15, M: 18, L: 15, XL: 12, XXL: 8, '2XL': 8 },
+    buyStock: { KIDS: 5, XS: 6, S: 10, M: 12, L: 10, XL: 8, XXL: 5, '2XL': 5 }
+  },
+  {
+    id: 'suit-kids-dino',
+    name: 'ชุดว่ายน้ำเด็กพร้อมหมวก Aqua Kids',
+    nameTH: 'ชุดว่ายน้ำเด็กพร้อมหมวก Aqua Kids',
+    category: 'kids',
+    rentPrice: 70,
+    buyPrice: 390,
+    depositPrice: 50,
+    colorHex: '#f59e0b',
+    colorNumber: 0xf59e0b,
+    icon: '🧒',
+    description: 'เนื้อผ้านุ่มพิเศษสำหรับเด็ก มาพร้อมหมวกว่ายน้ำเข้าชุด',
+    available: true,
+    availableColors: [
+      { colorId: 'yellow', colorName: 'สีเหลืองไดโน', colorHex: '#f59e0b', colorNumber: 0xf59e0b },
+      { colorId: 'sky', colorName: 'สีฟ้าอควา', colorHex: '#38bdf8', colorNumber: 0x38bdf8 },
+      { colorId: 'rose', colorName: 'สีชมพูคิดส์', colorHex: '#fb7185', colorNumber: 0xfb7185 }
+    ],
+    rentStock: { KIDS: 20, XS: 10, S: 6, M: 2, L: 0, XL: 0, XXL: 0, '2XL': 0 },
+    buyStock: { KIDS: 15, XS: 8, S: 4, M: 2, L: 0, XL: 0, XXL: 0, '2XL': 0 }
+  },
+  {
+    id: 'gear-goggles-cap',
+    name: 'เซ็ตแว่นตาว่ายน้ำ Anti-Fog + หมวกซิลิโคน',
+    nameTH: 'เซ็ตแว่นตาว่ายน้ำ Anti-Fog + หมวกซิลิโคน',
+    category: 'gear',
+    rentPrice: 50,
+    buyPrice: 290,
+    depositPrice: 50,
+    colorHex: '#6366f1',
+    colorNumber: 0x6366f1,
+    icon: '🥽',
+    description: 'แว่นตากันฝ้า UV400 พร้อมหมวกซิลิโคนเกรดแข่งขัน',
+    available: true,
+    availableColors: [
+      { colorId: 'indigo', colorName: 'สีน้ำเงินอินดิโก้', colorHex: '#6366f1', colorNumber: 0x6366f1 },
+      { colorId: 'dark', colorName: 'สีดำเมทัลลิก', colorHex: '#334155', colorNumber: 0x334155 },
+      { colorId: 'rose', colorName: 'สีโรสโกลด์', colorHex: '#f43f5e', colorNumber: 0xf43f5e }
+    ],
+    rentStock: { KIDS: 15, XS: 15, S: 20, M: 25, L: 20, XL: 15, XXL: 10, '2XL': 10 },
+    buyStock: { KIDS: 10, XS: 10, S: 15, M: 18, L: 15, XL: 10, XXL: 8, '2XL': 8 }
+  }
+]);
 
-export interface CheckinEntry {
-  id: string;
-  name: string;
-  code: string;
-  memberCount: number;
-  pricePerPerson: number;
-  totalPrice: number;
-  status: 'unpaid' | 'paid' | 'checked_out';
-  inTime: string;
-  outTime: string;
-}
-
-export const currentUser = writable<UserProfile | null>(null);
-export const isLoginModalOpen = writable<boolean>(false);
-export const activeModal = writable<string | null>(null);
-export const activeModalTab = writable<string | null>(null); // ควบคุมแท็บย่อยจาก URL Parameter
-export const prefillCheckin = writable<{ code: string; name: string }>({ code: '', name: '' }); // ข้อมูลเติมอัตโนมัติจาก URL
-
-export const isDrawerOpen = writable<boolean>(false);
-export const activeView = writable<string>('overview');
-export const currentFps = writable<number>(60);
-export const isPlayerMode = writable<boolean>(false);
-export const isEmergency = writable<boolean>(false);
-
-export const poolCapacity = writable({ current: 35, max: 50 });
-
-export const waterQuality = writable({
-  ph: 7.42,
-  chlorine: 1.20,
-  temp: 27.5,
-  orp: 742,
-  turbidity: 0.42,
-  tds: 480,
-  updated: '2 นาทีที่แล้ว'
+export const currentUser = writable<UserProfile | null>({
+  username: 'user',
+  name: 'สมาชิกสระว่ายน้ำ (Member User)',
+  displayName: 'สมาชิกสระว่ายน้ำ (Member User)',
+  role: 'user'
 });
 
-export const sensorsStore = writable([
-  { name: 'pH Probe #A1', status: 'online', value: '7.42', ping: '12 ms' },
-  { name: 'Chlorine Analyzer #B2', status: 'online', value: '1.20 ppm', ping: '18 ms' },
-  { name: 'Thermal Sensor #C3', status: 'online', value: '27.5 °C', ping: '9 ms' },
-  { name: 'Turbidity #D4', status: 'warning', value: '0.42 NTU', ping: '240 ms' }
-]);
+export const isLoginModalOpen = writable<boolean>(false);
+export const showLoginModal = isLoginModalOpen;
 
-export const lockerState = writable<Array<'free' | 'used' | 'mine'>>(
-  Array.from({ length: 30 }, (_, i) => ((i * 7 + 5) % 13) < 4 ? 'used' : 'free')
+export const activeHotspot = writable<HotspotId | null>(null);
+export const activeModal = activeHotspot;
+export const activeModalTab = writable<string>('default');
+
+export const isManagerDrawerOpen = writable<boolean>(false);
+export const isDrawerOpen = isManagerDrawerOpen;
+
+export const isExplorationMode = writable<boolean>(false);
+export const isEmergency = writable<boolean>(false);
+export const prefillCheckin = writable<{ code: string; name: string }>({ code: '', name: '' });
+
+export const poolMetrics = writable<PoolMetrics>({
+  ph: 7.4,
+  chlorine: 1.5,
+  temperature: 28.5,
+  turbidity: 0.3,
+  currentSwimmers: 35,
+  maxCapacity: 50,
+  kidsPoolSwimmers: 6,
+  activeLifeguards: 3
+});
+
+export const lockers = writable<LockerItem[]>(
+  Array.from({ length: 24 }, (_, i) => {
+    const num = (i + 1).toString().padStart(2, '0');
+    const zone = i < 8 ? 'A (ชาย)' : i < 16 ? 'B (หญิง)' : 'C (VIP)';
+    const isOccupied = [2, 5, 9, 14, 19].includes(i);
+    return {
+      id: `locker-${num}`,
+      number: `${zone[0]}-${num}`,
+      zone,
+      status: isOccupied ? 'occupied' : 'available',
+      reservedBy: isOccupied ? 'สมาชิกสระ' : undefined,
+      price: zone === 'C (VIP)' ? 80 : 40
+    };
+  })
 );
 
-export const slotsStore = writable([
-  { id: 'morning', name: 'Morning Slot', time: '06:00 – 12:00', total: 50, booked: 38, price: 120 },
-  { id: 'afternoon', name: 'Afternoon Slot', time: '12:00 – 17:00', total: 50, booked: 47, price: 120 },
-  { id: 'night', name: 'Night Slot', time: '17:00 – 21:00', total: 40, booked: 19, price: 150 }
-]);
-
-export const dateOptions = [
-  { d: 'จ.', n: '12' }, { d: 'อ.', n: '13' }, { d: 'พ.', n: '14' },
-  { d: 'พฤ.', n: '15' }, { d: 'ศ.', n: '16' }, { d: 'ส.', n: '17' }, { d: 'อา.', n: '18' }
-];
-
-export const myBookings = writable<Booking[]>([
+export const bookings = writable<BookingItem[]>([
   {
-    id: 'BK-2501',
-    slotId: 'morning',
-    slotName: 'Morning Slot',
-    dateIdx: 1,
-    dateLabel: 'อ. 13',
+    id: 'BK-1001',
+    customerName: 'คุณธนกร สายชล',
+    phone: '081-234-5678',
+    date: new Date().toISOString().split('T')[0],
+    timeSlot: '16:00 - 18:00',
+    poolZone: 'main',
     memberCount: 2,
-    pricePerPerson: 120,
     totalPrice: 240,
-    status: 'unpaid',
-    placed: '08:12'
-  },
-  {
-    id: 'BK-2502',
-    slotId: 'night',
-    slotName: 'Night Slot',
-    dateIdx: 4,
-    dateLabel: 'ศ. 16',
-    memberCount: 1,
-    pricePerPerson: 150,
-    totalPrice: 150,
     status: 'paid',
-    placed: '08:40'
+    qrRef: 'DP-QR-8821'
+  },
+  {
+    id: 'BK-1002',
+    customerName: 'คุณพิมพ์ชนก รักสุขภาพ',
+    phone: '089-876-5432',
+    date: new Date().toISOString().split('T')[0],
+    timeSlot: '18:00 - 20:00',
+    poolZone: 'kids',
+    memberCount: 3,
+    totalPrice: 270,
+    status: 'checked_in',
+    qrRef: 'DP-QR-8822'
   }
 ]);
 
-export const checkinEntriesStore = writable<CheckinEntry[]>([
+export const courseRegistrations = writable<CourseRegistration[]>([
   {
-    id: 'CK-8842',
-    name: 'ณภัทร ส.',
-    code: 'QR-8842',
-    memberCount: 2,
-    pricePerPerson: 120,
-    totalPrice: 240,
-    status: 'checked_out',
-    inTime: '08:12',
-    outTime: '09:35'
-  },
-  {
-    id: 'CK-2311',
-    name: 'ปุณยวีร์ ก.',
-    code: 'RF-2311',
+    id: 'CR-2001',
+    studentName: 'น้องภูผา',
+    phone: '082-111-2233',
+    courseName: 'Kids Beginner Survival (10 ชม.)',
+    instructor: 'โค้ชฉลาม (ครูเอก)',
+    schedule: 'เสาร์-อาทิตย์ 10:00 - 11:00',
     memberCount: 1,
-    pricePerPerson: 120,
-    totalPrice: 120,
-    status: 'paid',
-    inTime: '09:04',
-    outTime: '—'
+    totalPrice: 3500,
+    status: 'paid'
   }
 ]);
 
-export const memberData = {
-  name: 'ปุณยวีร์ กิตติวงศ์',
-  id: 'DP-004512',
-  tier: 'GOLD',
-  points: 1280,
-  nextTier: 2000,
-  expiry: '31 ธ.ค. 2568',
-  visits: 42
-};
-
-export const billingList = [
-  { item: 'ค่าสมาชิกรายเดือน (Gold)', amount: 850 },
-  { item: 'ค่าคอร์สเรียนว่ายน้ำ (4 ครั้ง)', amount: 1200 },
-  { item: 'ค่าเช่าล็อกเกอร์ประจำ', amount: 150 },
-  { item: 'ส่วนลดสมาชิก Gold (10%)', amount: -220 }
-];
-
-export const guardsList = [
-  { name: 'อนุชา พงษ์ทอง', role: 'Head Lifeguard', shift: '06:00 – 12:00', zone: 'โซน A / สระหลัก', status: 'on-duty', cert: 'ILS Certified', phone: '081-234-5678' },
-  { name: 'วรัญญา ศรีสุข', role: 'Lifeguard', shift: '12:00 – 17:00', zone: 'โซน B / สระเด็ก', status: 'standby', cert: 'CPR / AED', phone: '089-876-5432' },
-  { name: 'กิตติพงษ์ แก้วดี', role: 'Lifeguard', shift: '17:00 – 21:00', zone: 'โซน A / สระหลัก', status: 'off', cert: 'ILS Certified', phone: '086-555-1122' }
-];
-
-export const instructorsList = [
-  { name: 'โค้ชไมเคิล ใจดี', specialty: 'Freestyle / Competition', rating: 4.9, classes: 128, exp: '8 ปี', color: 'cyan' },
-  { name: 'โค้ชแพรว พิมพ์ใจ', specialty: 'Beginner / Kids', rating: 4.8, classes: 96, exp: '5 ปี', color: 'violet' },
-  { name: 'โค้ชเต้ย ธนวัฒน์', specialty: 'Advanced Stroke / Rescue', rating: 4.7, classes: 74, exp: '6 ปี', color: 'emerald' }
-];
-
-export const classesStore = writable([
-  { name: 'Freestyle Beginner', level: 'Beginner', time: 'จ. / พ. 18:00', coach: 'โค้ชแพรว พิมพ์ใจ', seats: 4, total: 12, price: 1500 },
-  { name: 'Advanced Stroke', level: 'Intermediate', time: 'อ. / พฤ. 19:00', coach: 'โค้ชไมเคิล ใจดี', seats: 2, total: 10, price: 1800 },
-  { name: 'Kids Water Safety', level: 'Kids 6-12', time: 'ส. 10:00', coach: 'โค้ชแพรว พิมพ์ใจ', seats: 7, total: 15, price: 1200 },
-  { name: 'Rescue & CPR', level: 'Advanced', time: 'อา. 14:00', coach: 'โค้ชเต้ย ธนวัฒน์', seats: 0, total: 8, price: 2500 }
-]);
-
-export const classRegistrationsStore = writable<ClassRegistration[]>([
+export const swimsuitOrders = writable<SwimsuitOrder[]>([
   {
-    id: 'CR-101',
-    classIdx: 0,
-    className: 'Freestyle Beginner',
-    coach: 'โค้ชแพรว พิมพ์ใจ',
-    time: 'จ. / พ. 18:00',
-    pricePerPerson: 1500,
-    memberCount: 2,
-    totalPrice: 3000,
-    status: 'unpaid',
-    registeredAt: '10:15 น.'
+    id: 'SW-3001',
+    customerName: 'คุณอานนท์ วารี',
+    phone: '086-555-4433',
+    items: [
+      {
+        cartItemId: 'ci-1',
+        itemId: 'suit-men-pro',
+        swimsuitId: 'suit-men-pro',
+        name: 'กางเกงว่ายน้ำชาย Pro Jammer (สีฟ้าสมุทร)',
+        orderType: 'rent',
+        size: 'L',
+        colorName: 'สีฟ้าสมุทร',
+        quantity: 1,
+        rentalDays: 1,
+        unitPrice: 90,
+        depositPerUnit: 100,
+        totalPrice: 190,
+        colorHex: '#0284c7',
+        colorNumber: 0x0284c7,
+        color: '#0284c7'
+      }
+    ],
+    subtotal: 90,
+    totalDeposit: 100,
+    totalAmount: 190,
+    status: 'paid',
+    createdAt: '14:20 น.'
   }
 ]);
-
-export const dashboardTimeframes = {
-  daily: {
-    revenue: 42850,
-    growth: '+12.4%',
-    visitors: '214 คน',
-    visitorsSub: 'เฉลี่ยต่อชั่วโมง 18 คน',
-    utilization: '70%',
-    utilizationSub: 'สูงสุด 18:00 (92%)',
-    waterScore: 'Optimal (98%)',
-    waterSub: 'pH 7.42 · Cl 1.2 ppm',
-    peakSummary: '17:00 – 19:30 น. (หนาแน่น 85–92%)',
-    offPeakSummary: '11:00 – 14:00 น. (คนน้อย 25–35%)',
-    peakDetails: [
-      { label: '06:00', val: 22 }, { label: '08:00', val: 58 }, { label: '10:00', val: 44 },
-      { label: '12:00', val: 35 }, { label: '14:00', val: 48 }, { label: '16:00', val: 76 },
-      { label: '18:00', val: 92 }, { label: '20:00', val: 54 }
-    ],
-    breakdown: [
-      { label: 'ค่าบัตรรายวัน / รอบว่ายน้ำ', value: 18400, color: 'bg-cyan-400' },
-      { label: 'สมาชิกรายเดือน', value: 14200, color: 'bg-violet-400' },
-      { label: 'คอร์สเรียนว่ายน้ำ', value: 6800, color: 'bg-emerald-400' },
-      { label: 'ล็อกเกอร์ & บริการเสริม', value: 3450, color: 'bg-amber-400' }
-    ]
-  },
-  weekly: {
-    revenue: 248600,
-    growth: '+8.2%',
-    visitors: '1,520 คน',
-    visitorsSub: 'เฉลี่ย 217 คน/วัน',
-    utilization: '68%',
-    utilizationSub: 'สูงสุดวันเสาร์-อาทิตย์',
-    waterScore: 'Stable (97%)',
-    waterSub: 'อุณหภูมิเฉลี่ย 27.6°C',
-    peakSummary: 'ศุกร์เย็น และ เสาร์–อาทิตย์ (14:00 – 19:00 น.)',
-    offPeakSummary: 'วันอังคาร และ วันพุธ (ช่วงกลางวัน)',
-    peakDetails: [
-      { label: 'จันทร์', val: 55 }, { label: 'อังคาร', val: 42 }, { label: 'พุธ', val: 48 },
-      { label: 'พฤหัส', val: 62 }, { label: 'ศุกร์', val: 84 }, { label: 'เสาร์', val: 96 },
-      { label: 'อาทิตย์', val: 90 }
-    ],
-    breakdown: [
-      { label: 'ค่าบัตรรายวัน / รอบว่ายน้ำ', value: 92000, color: 'bg-cyan-400' },
-      { label: 'คอร์สเรียนว่ายน้ำ', value: 85000, color: 'bg-emerald-400' },
-      { label: 'สมาชิกรายเดือน', value: 52000, color: 'bg-violet-400' },
-      { label: 'ล็อกเกอร์ & บริการเสริม', value: 19600, color: 'bg-amber-400' }
-    ]
-  },
-  monthly: {
-    revenue: 892400,
-    growth: '+9.8%',
-    visitors: '6,428 คน',
-    visitorsSub: 'เฉลี่ย 214 คน/วัน',
-    utilization: '72%',
-    utilizationSub: 'สัปดาห์ที่ 1 และ 4 สูงสุด',
-    waterScore: 'Excellent (99%)',
-    waterSub: 'การเปลี่ยนน้ำตามรอบมาตรฐาน',
-    peakSummary: 'สัปดาห์ที่ 1 และ 4 ของเดือน (ช่วงเปิดรอบคอร์ส)',
-    offPeakSummary: 'สัปดาห์ที่ 2 ช่วงกลางสัปดาห์',
-    peakDetails: [
-      { label: 'สัปดาห์ 1', val: 88 }, { label: 'สัปดาห์ 2', val: 64 },
-      { label: 'สัปดาห์ 3', val: 71 }, { label: 'สัปดาห์ 4', val: 94 }
-    ],
-    breakdown: [
-      { label: 'สมาชิกรายเดือน', value: 395000, color: 'bg-violet-400' },
-      { label: 'คอร์สเรียนว่ายน้ำ', value: 268000, color: 'bg-emerald-400' },
-      { label: 'ค่าบัตรรายวัน / รอบว่ายน้ำ', value: 165000, color: 'bg-cyan-400' },
-      { label: 'ล็อกเกอร์ & บริการเสริม', value: 64400, color: 'bg-amber-400' }
-    ]
-  }
-};
 
 export const toasts = writable<ToastMessage[]>([]);
 
-export function addToast(title: string, msg: string, type: ToastMessage['type'] = 'info') {
+export function addToast(
+  title: string,
+  message: string,
+  type: ToastMessage['type'] = 'info'
+) {
   const id = Math.random().toString(36).substring(2, 9);
-  toasts.update(list => [...list, { id, title, msg, type }]);
+  const normalizedType: ToastMessage['type'] =
+    type === 'warning' ? 'warn' : type === 'error' ? 'danger' : type;
+
+  toasts.update((all) => [
+    ...all,
+    { id, title, message, msg: message, type: normalizedType }
+  ]);
   setTimeout(() => {
-    toasts.update(list => list.filter(t => t.id !== id));
-  }, 3500);
+    toasts.update((all) => all.filter((t) => t.id !== id));
+  }, 4200);
 }
+
+export const totalRevenueSummary = derived(
+  [bookings, courseRegistrations, swimsuitOrders, lockers],
+  ([$bookings, $courses, $swimsuits, $lockers]) => {
+    const bookingRev = $bookings
+      .filter((b) => b.status === 'paid' || b.status === 'checked_in')
+      .reduce((sum, b) => sum + b.totalPrice, 0);
+
+    const courseRev = $courses
+      .filter((c) => c.status === 'paid')
+      .reduce((sum, c) => sum + c.totalPrice, 0);
+
+    const swimsuitRev = $swimsuits
+      .filter((s) => s.status === 'paid' || s.status === 'rented' || s.status === 'returned')
+      .reduce((sum, s) => sum + s.totalAmount, 0);
+
+    const lockerRev = $lockers
+      .filter((l) => l.status === 'occupied' || l.status === 'reserved')
+      .reduce((sum, l) => sum + l.price, 0);
+
+    return {
+      bookingRev,
+      courseRev,
+      swimsuitRev,
+      lockerRev,
+      total: bookingRev + courseRev + swimsuitRev + lockerRev
+    };
+  }
+);
