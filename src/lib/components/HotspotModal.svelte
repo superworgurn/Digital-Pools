@@ -262,7 +262,16 @@
   $: remainingKidsPool = Math.max(0, KIDS_POOL_MAX_CAPACITY - $poolMetrics.kidsPoolSwimmers);
   $: remainingSelectedPool = bkZone === 'kids' ? remainingKidsPool : remainingMainPool;
 
-  // --- Locker Reservation QR State (จำกัดเวลาจอง 4 ชม.) ---
+  $: {
+    if (remainingSelectedPool > 0) {
+      if (bkCount < 1) bkCount = 1;
+      if (bkCount > remainingSelectedPool) bkCount = remainingSelectedPool;
+    } else {
+      bkCount = 1;
+    }
+  }
+
+  // --- Locker Reservation QR State ---
   type LockerZoneFilter = 'all' | 'A' | 'B' | 'C';
   let lockerZoneFilter: LockerZoneFilter = 'all';
   let selectedLockerForQr: LockerItem | null = null;
@@ -366,6 +375,15 @@
     selectedCourseObj.maxStudents - enrolledInSelectedCourse
   );
 
+  $: {
+    if (remainingCourseSpots > 0) {
+      if (crCount < 1) crCount = 1;
+      if (crCount > remainingCourseSpots) crCount = remainingCourseSpots;
+    } else {
+      crCount = 1;
+    }
+  }
+
   $: currentCatalogItem =
     $SWIMSUIT_CATALOG.find((item) => item.id === selectedSuitId) || $SWIMSUIT_CATALOG[0];
 
@@ -437,10 +455,13 @@
     ? Math.max(0, (activeStockMap[effectiveSelectionSize] ?? 0) - reservedInCartForSelection)
     : 0;
 
-  $: if (remainingStockForSelection > 0 && suitQuantity > remainingStockForSelection) {
-    suitQuantity = remainingStockForSelection;
-  } else if (remainingStockForSelection === 0 && suitQuantity !== 1) {
-    suitQuantity = 1;
+  $: {
+    if (remainingStockForSelection > 0) {
+      if (suitQuantity < 1) suitQuantity = 1;
+      if (suitQuantity > remainingStockForSelection) suitQuantity = remainingStockForSelection;
+    } else {
+      suitQuantity = 1;
+    }
   }
 
   $: calculatedUnitPrice = (() => {
@@ -502,6 +523,10 @@
     if (!currentCatalogItem) return;
     if (remainingStockForSelection <= 0) {
       addToast('สินค้าหมด', `สินค้าชิ้นนี้สำหรับ${selectedOrderType === 'rent' ? 'เช่า' : 'ซื้อ'}หมดแล้ว`, 'warning');
+      return;
+    }
+    if (suitQuantity < 1) {
+      suitQuantity = 1;
       return;
     }
     if (suitQuantity > remainingStockForSelection) {
@@ -719,6 +744,11 @@
       addToast('สระรอบนี้เต็มแล้ว', 'กรุณาเลือกโซนสระอื่นหรือรอรอบถัดไป', 'warning');
       return;
     }
+    if (bkCount < 1) {
+      bkCount = 1;
+      addToast('ระบุจำนวนไม่ถูกต้อง', 'กรุณาระบุจำนวนผู้เข้าใช้บริการอย่างน้อย 1 ท่าน', 'warning');
+      return;
+    }
     if (bkCount > remainingSelectedPool) {
       bkCount = remainingSelectedPool;
       addToast(
@@ -727,9 +757,6 @@
         'warning'
       );
       return;
-    }
-    if (bkCount < 1) {
-      bkCount = 1;
     }
     showBookingQr = true;
   }
@@ -870,6 +897,11 @@
       addToast('คอร์สนี้เต็มแล้ว', 'กรุณาเลือกคอร์สเรียนอื่น', 'warning');
       return;
     }
+    if (crCount < 1) {
+      crCount = 1;
+      addToast('ระบุจำนวนไม่ถูกต้อง', 'กรุณาระบุจำนวนผู้เรียนอย่างน้อย 1 ท่าน', 'warning');
+      return;
+    }
     if (crCount > remainingCourseSpots) {
       crCount = remainingCourseSpots;
       addToast(
@@ -878,9 +910,6 @@
         'warning'
       );
       return;
-    }
-    if (crCount < 1) {
-      crCount = 1;
     }
     showCourseQr = true;
   }
@@ -2001,21 +2030,17 @@
           </div>
 
         {:else if $activeHotspot === 'restroom'}
-          <!-- ==================== โซนห้องน้ำ & ห้องเปลี่ยนชุด ==================== -->
+          <!-- ==================== โซนห้องน้ำ & ห้องเปลี่ยนชุด (แสดงผลสั้นๆ ตามต้องการ) ==================== -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="rounded-xl border border-cyan-500/30 bg-slate-800/60 p-5 space-y-2">
-              <div class="text-cyan-400 font-bold text-base">🚹 ห้องเปลี่ยนชุด & ห้องน้ำชาย</div>
-              <div class="text-3xl font-extrabold text-white">ว่าง 5 / 6 ห้อง</div>
-              <p class="text-xs text-slate-300">
-                ฝักบัวอาบน้ำอุ่น • ไดร์เป่าผม • ตู้ล็อกเกอร์เชื่อมระบบสายรัดข้อมือ RFID
-              </p>
+            <div class="rounded-xl border border-cyan-500/30 bg-slate-800/60 p-6 space-y-2 text-center">
+              <div class="text-3xl">🚹</div>
+              <div class="text-cyan-400 font-bold text-lg">ห้องน้ำกับห้องเปลี่ยนชุดชาย</div>
+              <p class="text-xs text-slate-300">ห้องน้ำชายและห้องเปลี่ยนชุดพร้อมให้บริการ</p>
             </div>
-            <div class="rounded-xl border border-pink-500/30 bg-slate-800/60 p-5 space-y-2">
-              <div class="text-pink-400 font-bold text-base">🚺 ห้องเปลี่ยนชุด & ห้องน้ำหญิง</div>
-              <div class="text-3xl font-extrabold text-white">ว่าง 4 / 6 ห้อง</div>
-              <p class="text-xs text-slate-300">
-                ห้องแต่งตัวส่วนตัว • ไดร์เป่าผม • ตู้ล็อกเกอร์เชื่อมระบบสายรัดข้อมือ RFID
-              </p>
+            <div class="rounded-xl border border-pink-500/30 bg-slate-800/60 p-6 space-y-2 text-center">
+              <div class="text-3xl">🚺</div>
+              <div class="text-pink-400 font-bold text-lg">ห้องน้ำกับห้องเปลี่ยนชุดหญิง</div>
+              <p class="text-xs text-slate-300">ห้องน้ำหญิงและห้องเปลี่ยนชุดพร้อมให้บริการ</p>
             </div>
           </div>
 
