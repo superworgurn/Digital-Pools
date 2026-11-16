@@ -11,7 +11,8 @@
     activeHotspot,
     currentUser,
     isManagerDrawerOpen,
-    isExplorationMode
+    isExplorationMode,
+    addToast
   } from '../stores';
   import type { HotspotId } from '../../types';
   import { BarChart3, Compass } from 'lucide-svelte';
@@ -27,6 +28,17 @@
   $: if (engine) {
     engine.setExplorationMode($isExplorationMode);
   }
+
+  // กรองปุ่มคุณภาพน้ำ/IoT ให้เฉพาะ Admin เท่านั้นที่มองเห็น
+  $: visibleHotspots = hotspotCoords.filter(
+    (hs) => hs.visible && (hs.id !== 'water' || $currentUser?.role === 'admin')
+  );
+
+  // ป้องกันการกดปุ่ม E หน้าเซ็นเซอร์น้ำหากไม่ใช่ Admin
+  $: effectiveNearbyZone =
+    nearbyZone && nearbyZone.id === 'water' && $currentUser?.role !== 'admin'
+      ? null
+      : nearbyZone;
 
   function handleCameraPresetEvent(e: Event) {
     const preset = (e as CustomEvent).detail || 'overview';
@@ -49,12 +61,22 @@
   }
 
   function handleLifeguardEmergency() {
-    engine?.triggerLifeguardEmergency();
+    if (!engine) return;
+    if ($isExplorationMode) {
+      isExplorationMode.set(false);
+    }
+    engine.setCameraPreset('pool');
+    engine.triggerLifeguardEmergency();
   }
 
   function handleOpenHotspotEvent(e: Event) {
     const id = (e as CustomEvent).detail as HotspotId;
-    if (id) activeHotspot.set(id);
+    if (!id) return;
+    if (id === 'water' && $currentUser?.role !== 'admin') {
+      addToast('จำกัดสิทธิ์เฉพาะผู้ดูแลระบบ', 'เมนูคุณภาพน้ำ/IoT สำหรับ Admin เท่านั้น', 'warn');
+      return;
+    }
+    activeHotspot.set(id);
   }
 
   function setDpadMove(vx: number, vz: number) {
@@ -62,8 +84,8 @@
   }
 
   function interactNearbyZone() {
-    if (nearbyZone) {
-      activeHotspot.set(nearbyZone.id);
+    if (effectiveNearbyZone) {
+      activeHotspot.set(effectiveNearbyZone.id);
     }
   }
 
@@ -112,6 +134,10 @@
   });
 
   function openHotspot(id: HotspotId) {
+    if (id === 'water' && $currentUser?.role !== 'admin') {
+      addToast('จำกัดสิทธิ์เฉพาะผู้ดูแลระบบ', 'เมนูคุณภาพน้ำ/IoT สำหรับ Admin เท่านั้น', 'warn');
+      return;
+    }
     activeHotspot.set(id);
   }
 </script>
@@ -158,23 +184,21 @@
     {/if}
   {/each}
 
-  <!-- ปุ่ม 3D Hotspots แบบ Pill -->
-  {#each hotspotCoords as hs (hs.id)}
-    {#if hs.visible}
-      <button
-        type="button"
-        on:click={() => openHotspot(hs.id)}
-        class="fixed top-0 left-0 z-20 group flex items-center gap-2 rounded-full border border-cyan-300/80 bg-slate-900/95 hover:bg-sky-700 px-3.5 py-1.5 text-xs font-bold text-white shadow-lg transition-colors cursor-pointer whitespace-nowrap will-change-transform"
-        style="transform: translate3d({hs.x}px, {hs.y}px, 0) translate(-50%, -50%);"
+  <!-- ปุ่ม 3D Hotspots แบบ Pill (คุณภาพน้ำแสดงเฉพาะ Admin) -->
+  {#each visibleHotspots as hs (hs.id)}
+    <button
+      type="button"
+      on:click={() => openHotspot(hs.id)}
+      class="fixed top-0 left-0 z-20 group flex items-center gap-2 rounded-full border border-cyan-300/80 bg-slate-900/95 hover:bg-sky-700 px-3.5 py-1.5 text-xs font-bold text-white shadow-lg transition-colors cursor-pointer whitespace-nowrap will-change-transform"
+      style="transform: translate3d({hs.x}px, {hs.y}px, 0) translate(-50%, -50%);"
+    >
+      <span
+        class="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-400/20 text-xs"
       >
-        <span
-          class="flex h-5 w-5 items-center justify-center rounded-full bg-cyan-400/20 text-xs"
-        >
-          {hs.icon}
-        </span>
-        <span>{hs.title}</span>
-      </button>
-    {/if}
+        {hs.icon}
+      </span>
+      <span>{hs.title}</span>
+    </button>
   {/each}
 
   <!-- HUD เมื่อเปิดโหมดเดินสำรวจ (Player Mode) -->
@@ -182,14 +206,14 @@
     <div
       class="fixed bottom-16 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-2 w-[92vw] max-w-md"
     >
-      {#if nearbyZone}
+      {#if effectiveNearbyZone}
         <button
           type="button"
           on:click={interactNearbyZone}
           class="animate-bounce flex items-center gap-2 rounded-2xl border-2 border-emerald-300 bg-emerald-500 hover:bg-emerald-400 px-5 py-2.5 text-xs sm:text-sm font-extrabold text-slate-950 shadow-2xl cursor-pointer"
         >
-          <span class="text-base">{nearbyZone.icon}</span>
-          <span>กด [E] หรือคลิกเพื่อใช้งาน: {nearbyZone.title}</span>
+          <span class="text-base">{effectiveNearbyZone.icon}</span>
+          <span>กด [E] หรือคลิกเพื่อใช้งาน: {effectiveNearbyZone.title}</span>
         </button>
       {/if}
 

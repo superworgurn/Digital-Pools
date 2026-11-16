@@ -1020,7 +1020,9 @@ export class PoolDigitalTwinEngine {
 
   public triggerLifeguardEmergency() {
     this.lifeguardEmergencyActive = true;
+    this.lifeguardPhase = 0;
     this.lifeguardAngle = 0;
+    this.lifeguardPos = { x: 10.5, y: 2.2, z: -6.5 };
   }
 
   public setExplorationMode(enabled: boolean) {
@@ -1449,6 +1451,7 @@ export class PoolDigitalTwinEngine {
       this.lifeguardPhase += dt;
       if (this.lifeguardPhase > 6.0) {
         this.lifeguardEmergencyActive = false;
+        this.lifeguardPhase = 0;
         this.lifeguardPos = { x: 10.5, y: 2.2, z: -6.5 };
       }
     }

@@ -7,6 +7,9 @@
     currentUser,
     isLoginModalOpen,
     poolMetrics,
+    activeVipMembership,
+    crmProfile,
+    crmTierStatus,
     addToast
   } from '../stores';
   import {
@@ -19,7 +22,9 @@
     Compass,
     LogIn,
     LogOut,
-    BarChart3
+    BarChart3,
+    Crown,
+    Award
   } from 'lucide-svelte';
 
   let activeCamTab: string = 'overview';
@@ -51,6 +56,9 @@
   function handleLogout() {
     currentUser.set(null);
     isManagerDrawerOpen.set(false);
+    if ($activeHotspot === 'water') {
+      activeHotspot.set(null);
+    }
     addToast('ออกจากระบบแล้ว', 'กำลังใช้งานในโหมดผู้เยี่ยมชม (Guest)', 'info');
   }
 </script>
@@ -59,8 +67,8 @@
   <div
     class="pointer-events-auto w-full flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-700/60 bg-slate-900/80 px-4 py-2.5 backdrop-blur-xl shadow-2xl"
   >
-    <!-- ซ้าย: ช่องใส่รูปโลโก้ + ชื่อแบรนด์ + สถานะคุณภาพน้ำ + จำนวนผู้เข้าใช้ -->
-    <div class="flex flex-wrap items-center gap-3">
+    <!-- ซ้าย: ช่องใส่รูปโลโก้ + ชื่อแบรนด์ + สถานะคุณภาพน้ำ (Admin Only) + จำนวนผู้เข้าใช้ + VIP & แต้ม CRM -->
+    <div class="flex flex-wrap items-center gap-2.5">
       <div class="flex items-center gap-2.5">
         <div
           class="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-cyan-400 to-sky-500 text-slate-950 shadow-lg shadow-cyan-500/25 shrink-0"
@@ -84,14 +92,17 @@
         </div>
       </div>
 
-      <button
-        type="button"
-        on:click={() => activeHotspot.set('water')}
-        class="hidden md:flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-slate-800/80 px-3 py-1.5 text-xs text-slate-200 hover:border-emerald-400 transition cursor-pointer"
-      >
-        <Droplets class="w-3.5 h-3.5 text-emerald-400" />
-        <span>คุณภาพน้ำ: <strong class="text-emerald-400">Optimal</strong></span>
-      </button>
+      <!-- ปุ่มคุณภาพน้ำ / IoT แสดงและกดดูได้เฉพาะ Admin เท่านั้น -->
+      {#if $currentUser?.role === 'admin'}
+        <button
+          type="button"
+          on:click={() => activeHotspot.set('water')}
+          class="hidden md:flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-slate-800/80 px-3 py-1.5 text-xs text-slate-200 hover:border-emerald-400 transition cursor-pointer"
+        >
+          <Droplets class="w-3.5 h-3.5 text-emerald-400" />
+          <span>คุณภาพน้ำ/IoT: <strong class="text-emerald-400">Optimal</strong></span>
+        </button>
+      {/if}
 
       <button
         type="button"
@@ -100,6 +111,23 @@
       >
         <Users class="w-3.5 h-3.5 text-cyan-400" />
         <span>ผู้เข้าใช้ <strong class="text-cyan-300">{$poolMetrics.currentSwimmers}/{$poolMetrics.maxCapacity}</strong></span>
+      </button>
+
+      <!-- ปุ่มแต้มสะสม CRM (สำหรับ User ทุกระดับ) & สมาชิก VIP -->
+      <button
+        type="button"
+        on:click={() => activeHotspot.set('vip')}
+        class="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition cursor-pointer {$activeVipMembership?.status === 'active'
+          ? 'border-amber-400 bg-amber-500/20 text-amber-300 shadow-sm shadow-amber-500/20'
+          : 'border-cyan-500/40 bg-slate-800/80 text-cyan-200 hover:border-amber-400'}"
+      >
+        {#if $activeVipMembership?.status === 'active'}
+          <Crown class="w-3.5 h-3.5 text-amber-400" />
+          <span>{$activeVipMembership.tierName} • {$crmProfile.points.toLocaleString()} แต้ม</span>
+        {:else}
+          <Award class="w-3.5 h-3.5 text-amber-400" />
+          <span>{$crmTierStatus.rank}: {$crmProfile.points.toLocaleString()} แต้ม • สมัคร VIP</span>
+        {/if}
       </button>
     </div>
 
@@ -147,7 +175,7 @@
           class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-pink-300 hover:bg-pink-500/20 transition cursor-pointer"
         >
           <ShoppingBag class="w-3.5 h-3.5 text-pink-400" />
-          <span>ร้านชุดว่ายน้ำ</span>
+          <span>ร้านชุดว่ายน้ำ & ผ้าขนหนู</span>
         </button>
       </div>
 
@@ -157,7 +185,7 @@
         class="xl:hidden flex items-center gap-1 rounded-xl bg-pink-600 hover:bg-pink-500 px-3 py-2 text-xs font-bold text-white shadow cursor-pointer"
       >
         <ShoppingBag class="w-3.5 h-3.5" />
-        <span>ชุดว่ายน้ำ</span>
+        <span>ร้านเช่า/ซื้อ</span>
       </button>
 
       <a

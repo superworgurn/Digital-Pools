@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import {
     activeHotspot,
+    currentUser,
     SWIMSUIT_CATALOG,
     SIZE_PRICE_MODIFIERS,
     PAYMENT_QR_IMAGE_URL,
@@ -10,6 +11,16 @@
     courseRegistrations,
     lockers,
     poolMetrics,
+    activeVipMembership,
+    vipHistory,
+    vipDiscountPercent,
+    crmProfile,
+    crmTierStatus,
+    earnCrmPoints,
+    redeemCrmPoints,
+    latestQueueTicket,
+    generateQueueCode,
+    downloadQueueTicketJpg,
     addToast
   } from '../stores';
   import type {
@@ -17,10 +28,15 @@
     SwimsuitOrderType,
     SwimsuitCartItem,
     SwimsuitCatalogItem,
-    LockerItem
+    LockerItem,
+    VipTier,
+    VipBillingCycle,
+    PoolBooking,
+    SwimsuitOrder,
+    CourseRegistration
   } from '../../types';
 
-  type CategoryFilter = 'all' | 'men' | 'women' | 'kids' | 'unisex' | 'gear';
+  type CategoryFilter = 'all' | 'men' | 'women' | 'kids' | 'unisex' | 'gear' | 'towel';
 
   interface CourseOption {
     id: string;
@@ -31,7 +47,179 @@
     maxStudents: number;
   }
 
-  // --- Swimwear Rental & Purchase State ---
+  let isConfirmingPayment = false;
+  const LOCKER_DURATION_HOURS = 4;
+
+  // --- VIP Membership & CRM State ---
+  interface VipPackageConfig {
+    tier: Exclude<VipTier, 'none'>;
+    name: string;
+    subtitle: string;
+    monthlyPrice: number;
+    yearlyPrice: number;
+    discountPercent: number;
+    maxMembers: number;
+  }
+
+  const vipPackages: VipPackageConfig[] = [
+    {
+      tier: 'single',
+      name: 'สมาชิก VIP (เดี่ยว)',
+      subtitle: 'สำหรับ 1 ท่าน • จองล็อกเกอร์ฟรีทุกโซน + ส่วนลดร้านเช่า/ซื้อ 10%',
+      monthlyPrice: 300,
+      yearlyPrice: 3000,
+      discountPercent: 10,
+      maxMembers: 1
+    },
+    {
+      tier: 'couple',
+      name: 'คู่รัก VIP (Couple VIP)',
+      subtitle: 'สำหรับ 2 ท่าน • จองล็อกเกอร์ฟรีทุกโซน + ส่วนลดร้านเช่า/ซื้อ 15%',
+      monthlyPrice: 500,
+      yearlyPrice: 4500,
+      discountPercent: 15,
+      maxMembers: 2
+    },
+    {
+      tier: 'family',
+      name: 'ครอบครัว VIP (Family VIP)',
+      subtitle: 'รองรับสูงสุด 6 คน • จองล็อกเกอร์ฟรีทุกโซน + ส่วนลดร้านเช่า/ซื้อ 20%',
+      monthlyPrice: 2000,
+      yearlyPrice: 25000,
+      discountPercent: 20,
+      maxMembers: 6
+    }
+  ];
+
+  let selectedVipTier: Exclude<VipTier, 'none'> = 'single';
+  let selectedVipCycle: VipBillingCycle = 'monthly';
+  let vipOwnerName = 'สมาชิกสระว่ายน้ำ (Member User)';
+  let vipPhone = '081-999-8888';
+  let vipMemberNames: string[] = ['', '', '', '', '', ''];
+  let showVipQr = false;
+  let confirmCancelVip = false;
+
+  $: activeVipPkg = vipPackages.find((p) => p.tier === selectedVipTier) || vipPackages[0];
+  $: activeVipPrice =
+    selectedVipCycle === 'monthly' ? activeVipPkg.monthlyPrice : activeVipPkg.yearlyPrice;
+  $: isUserVip = $activeVipMembership?.status === 'active';
+
+  function proceedToVipQr() {
+    if (isUserVip) {
+      addToast(
+        'คุณเป็นสมาชิก VIP อยู่แล้ว',
+        `แพ็กเกจปัจจุบัน: ${$activeVipMembership?.tierName} (หมดอายุ ${$activeVipMembership?.expiresAt})`,
+        'warning'
+      );
+      return;
+    }
+    if (!vipOwnerName.trim()) {
+      addToast('กรุณากรอกชื่อผู้สมัคร', 'ระบุชื่อ-นามสกุลผู้ถือบัตร VIP หลัก', 'warning');
+      return;
+    }
+    showVipQr = true;
+  }
+
+  function confirmVipPayment() {
+    if (isConfirmingPayment) return;
+    if (isUserVip) {
+      showVipQr = false;
+      addToast('คุณมีสถานะสมาชิก VIP อยู่แล้ว', 'ไม่สามารถสมัครซ้ำซ้อนได้', 'warning');
+      return;
+    }
+    isConfirmingPayment = true;
+
+    try {
+      const queueCode = generateQueueCode('VIP');
+      const now = new Date();
+      const expireDate = new Date(now);
+      if (selectedVipCycle === 'monthly') {
+        expireDate.setMonth(expireDate.getMonth() + 1);
+      } else {
+        expireDate.setFullYear(expireDate.getFullYear() + 1);
+      }
+
+      const extraMembers = vipMemberNames
+        .slice(0, Math.max(0, activeVipPkg.maxMembers - 1))
+        .map((n) => n.trim())
+        .filter(Boolean);
+
+      const newMembership = {
+        id: `VIP-${Math.floor(1000 + Math.random() * 9000)}`,
+        tier: activeVipPkg.tier,
+        tierName: activeVipPkg.name,
+        billingCycle: selectedVipCycle,
+        price: activeVipPrice,
+        discountPercent: activeVipPkg.discountPercent,
+        maxMembers: activeVipPkg.maxMembers,
+        ownerName: vipOwnerName.trim(),
+        phone: vipPhone.trim(),
+        familyMembers: [vipOwnerName.trim(), ...extraMembers],
+        expiresAt: expireDate.toLocaleDateString('th-TH'),
+        queueCode,
+        status: 'active' as const
+      };
+
+      activeVipMembership.set(newMembership);
+      vipHistory.update((h) => [newMembership, ...h]);
+      confirmCancelVip = false;
+      const earnedPts = earnCrmPoints(activeVipPrice, `สมัครสมาชิก ${activeVipPkg.name}`);
+
+      latestQueueTicket.set({
+        queueCode,
+        serviceTitle: `สมัครสมาชิก ${activeVipPkg.name}`,
+        customerName: vipOwnerName.trim(),
+        detailLine1: `แพ็กเกจ: ${selectedVipCycle === 'monthly' ? 'รายเดือน' : 'รายปี'} (รองรับ ${activeVipPkg.maxMembers} ท่าน)`,
+        detailLine2: `สิทธิพิเศษ: ล็อกเกอร์ฟรี + ลด ${activeVipPkg.discountPercent}% • รับ +${earnedPts} แต้ม CRM`,
+        amountText: `ชำระแล้ว: ${activeVipPrice.toLocaleString()} บาท`,
+        timestamp: now.toLocaleString('th-TH')
+      });
+
+      showVipQr = false;
+      activeHotspot.set(null);
+
+      addToast(
+        'สมัครสมาชิก VIP สำเร็จ! 👑',
+        `${activeVipPkg.name} • คิว ${queueCode} • รับ +${earnedPts} แต้มสะสม CRM`,
+        'success'
+      );
+    } finally {
+      isConfirmingPayment = false;
+    }
+  }
+
+  function cancelVipMembership() {
+    const currentVip = $activeVipMembership;
+    if (!currentVip || currentVip.status !== 'active') return;
+
+    const penalty = Math.round(currentVip.price * 0.2);
+    const refund = currentVip.price - penalty;
+
+    vipHistory.update((all) =>
+      all.map((v) =>
+        v.id === currentVip.id
+          ? {
+              ...v,
+              status: 'cancelled',
+              penaltyAmount: penalty,
+              refundAmount: refund
+            }
+          : v
+      )
+    );
+
+    activeVipMembership.set(null);
+    confirmCancelVip = false;
+    showVipQr = false;
+
+    addToast(
+      `ยกเลิกสมาชิก ${currentVip.tierName} แล้ว`,
+      `หักค่าธรรมเนียมยกเลิก 20% (${penalty.toLocaleString()}฿) • คืนเงิน ${refund.toLocaleString()}฿`,
+      'warning'
+    );
+  }
+
+  // --- Swimwear & Towel Rental & Purchase State ---
   let selectedCategory: CategoryFilter = 'all';
   let selectedOrderType: SwimsuitOrderType = 'rent';
   let selectedSuitId: string = 'suit-men-pro';
@@ -44,6 +232,7 @@
   let showSwimsuitQrPayment = false;
   let qrImageLoadError = false;
   let editingCartItemId: string | null = null;
+  let useCrmPointDiscount = false;
 
   const sizeList: SwimsuitSize[] = ['KIDS', 'XS', 'S', 'M', 'L', 'XL', '2XL'];
   const categoryButtons: { id: CategoryFilter; label: string }[] = [
@@ -52,10 +241,14 @@
     { id: 'women', label: 'หญิง' },
     { id: 'unisex', label: 'Unisex แขนยาว' },
     { id: 'kids', label: 'เด็ก' },
-    { id: 'gear', label: 'แว่นตา/หมวก' }
+    { id: 'gear', label: 'แว่นตา/หมวก' },
+    { id: 'towel', label: 'ผ้าขนหนู' }
   ];
 
-  // --- Pool Check-in / Booking State ---
+  // --- Pool Check-in / Check-out / Booking State ---
+  type CheckinSubTab = 'book' | 'checkinout' | 'history';
+  let checkinTab: CheckinSubTab = 'book';
+
   const KIDS_POOL_MAX_CAPACITY = 20;
   let bkName = 'สมาชิกสระว่ายน้ำ (Member User)';
   let bkPhone = '089-123-4567';
@@ -69,9 +262,22 @@
   $: remainingKidsPool = Math.max(0, KIDS_POOL_MAX_CAPACITY - $poolMetrics.kidsPoolSwimmers);
   $: remainingSelectedPool = bkZone === 'kids' ? remainingKidsPool : remainingMainPool;
 
-  // --- Locker Reservation QR State ---
+  // --- Locker Reservation QR State (จำกัดเวลาจอง 4 ชม.) ---
+  type LockerZoneFilter = 'all' | 'A' | 'B' | 'C';
+  let lockerZoneFilter: LockerZoneFilter = 'all';
   let selectedLockerForQr: LockerItem | null = null;
   let lockerCustomerName: string = 'สมาชิกสระว่ายน้ำ (Member User)';
+  let lastReservedLockerBanner: {
+    number: string;
+    zone: string;
+    queueCode: string;
+    reservedUntil: string;
+  } | null = null;
+
+  $: filteredLockers =
+    lockerZoneFilter === 'all'
+      ? $lockers
+      : $lockers.filter((l) => l.number.startsWith(`${lockerZoneFilter}-`));
 
   // --- Course Registration State ---
   const courseOptions: CourseOption[] = [
@@ -136,6 +342,7 @@
       bkName = nameParam;
       lockerCustomerName = nameParam;
       crStudent = nameParam;
+      vipOwnerName = nameParam;
     }
 
     const phoneParam = params.get('phone');
@@ -143,6 +350,7 @@
       customerPhone = phoneParam;
       bkPhone = phoneParam;
       crPhone = phoneParam;
+      vipPhone = phoneParam;
     }
   });
 
@@ -161,7 +369,8 @@
   $: currentCatalogItem =
     $SWIMSUIT_CATALOG.find((item) => item.id === selectedSuitId) || $SWIMSUIT_CATALOG[0];
 
-  $: isGearItem = currentCatalogItem?.category === 'gear';
+  $: isFreeSizeItem =
+    currentCatalogItem?.category === 'gear' || currentCatalogItem?.category === 'towel';
 
   $: if (currentCatalogItem) {
     const availableCols = currentCatalogItem.availableColors || [];
@@ -190,6 +399,9 @@
 
   function getTotalItemStock(item: SwimsuitCatalogItem, type: SwimsuitOrderType): number {
     const stockMap = getActiveStockRecord(item, type);
+    if (item.category === 'gear' || item.category === 'towel') {
+      return stockMap['M'] ?? 0;
+    }
     return sizeList.reduce((sum, sz) => sum + (stockMap[sz] ?? 0), 0);
   }
 
@@ -207,11 +419,13 @@
     return Math.max(0, (stockMap[sz] ?? 0) - inCart);
   }
 
+  $: effectiveSelectionSize = isFreeSizeItem ? 'M' : selectedSize;
+
   $: reservedInCartForSelection = cartItems
     .filter(
       (ci) =>
         ci.itemId === selectedSuitId &&
-        ci.size === selectedSize &&
+        ci.size === effectiveSelectionSize &&
         ci.orderType === selectedOrderType &&
         ci.cartItemId !== editingCartItemId
     )
@@ -220,7 +434,7 @@
   $: activeStockMap = currentCatalogItem ? getActiveStockRecord(currentCatalogItem, selectedOrderType) : null;
 
   $: remainingStockForSelection = activeStockMap
-    ? Math.max(0, (activeStockMap[selectedSize] ?? 0) - reservedInCartForSelection)
+    ? Math.max(0, (activeStockMap[effectiveSelectionSize] ?? 0) - reservedInCartForSelection)
     : 0;
 
   $: if (remainingStockForSelection > 0 && suitQuantity > remainingStockForSelection) {
@@ -231,7 +445,7 @@
 
   $: calculatedUnitPrice = (() => {
     if (!currentCatalogItem) return 0;
-    const mod = SIZE_PRICE_MODIFIERS[selectedSize];
+    const mod = SIZE_PRICE_MODIFIERS[effectiveSelectionSize];
     if (selectedOrderType === 'rent') {
       return Math.max(40, currentCatalogItem.rentPrice + mod.extraRent);
     } else {
@@ -242,7 +456,21 @@
   $: calculatedDeposit =
     selectedOrderType === 'rent' && currentCatalogItem ? currentCatalogItem.depositPrice : 0;
 
-  $: cartGrandTotal = cartItems.reduce((sum, i) => sum + i.totalPrice, 0);
+  $: canRedeemCrm = $crmProfile.points >= 100;
+  $: if (!canRedeemCrm && useCrmPointDiscount) {
+    useCrmPointDiscount = false;
+  }
+
+  $: cartRawTotal = cartItems.reduce((sum, i) => sum + i.totalPrice, 0);
+  $: cartBaseRentalOrBuyFee = cartItems.reduce((sum, i) => sum + i.unitPrice * i.quantity, 0);
+  $: cartVipDiscountAmount = Math.round((cartBaseRentalOrBuyFee * $vipDiscountPercent) / 100);
+  $: cartCrmDiscountAmount = useCrmPointDiscount && canRedeemCrm ? Math.min(50, Math.max(0, cartRawTotal - cartVipDiscountAmount)) : 0;
+  $: cartGrandTotal = Math.max(0, cartRawTotal - cartVipDiscountAmount - cartCrmDiscountAmount);
+
+  $: previewRawTotal = (calculatedUnitPrice + calculatedDeposit) * suitQuantity;
+  $: previewVipDiscount = Math.round((calculatedUnitPrice * suitQuantity * $vipDiscountPercent) / 100);
+  $: previewCrmDiscount = useCrmPointDiscount && canRedeemCrm ? Math.min(50, Math.max(0, previewRawTotal - previewVipDiscount)) : 0;
+  $: previewFinalTotal = Math.max(0, previewRawTotal - previewVipDiscount - previewCrmDiscount);
 
   function decreaseSuitQty() {
     if (suitQuantity > 1) {
@@ -287,14 +515,16 @@
     }
 
     const totalPerUnit = calculatedUnitPrice + calculatedDeposit;
-    const itemNameSuffix = isGearItem ? `(${activeColorObj.colorName})` : `(${activeColorObj.colorName}, ไซส์ ${selectedSize})`;
+    const itemNameSuffix = isFreeSizeItem
+      ? `(${activeColorObj.colorName}, Free Size)`
+      : `(${activeColorObj.colorName}, ไซส์ ${selectedSize})`;
     const newItem: SwimsuitCartItem = {
       cartItemId: editingCartItemId || `cart-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
       itemId: currentCatalogItem.id,
       swimsuitId: currentCatalogItem.id,
       name: `${currentCatalogItem.name} ${itemNameSuffix}`,
       orderType: selectedOrderType,
-      size: selectedSize,
+      size: effectiveSelectionSize,
       colorName: activeColorObj.colorName,
       quantity: suitQuantity,
       rentalDays: 1,
@@ -322,6 +552,7 @@
   }
 
   function editCartItem(item: SwimsuitCartItem) {
+    selectedSuitId = item.itemId;
     selectedOrderType = item.orderType;
     selectedSize = item.size;
     suitQuantity = item.quantity;
@@ -344,71 +575,142 @@
   }
 
   function confirmSwimsuitQrPayment() {
-    if (cartItems.length === 0) return;
+    if (isConfirmingPayment || cartItems.length === 0) return;
+    isConfirmingPayment = true;
+
+    try {
+      SWIMSUIT_CATALOG.update((catalog) =>
+        catalog.map((prod) => {
+          const nextRentStock = { ...prod.rentStock };
+          const nextBuyStock = { ...prod.buyStock };
+
+          cartItems.forEach((ci) => {
+            if (ci.itemId === prod.id) {
+              if (ci.orderType === 'rent') {
+                nextRentStock[ci.size] = Math.max(0, (nextRentStock[ci.size] || 0) - ci.quantity);
+              } else {
+                nextBuyStock[ci.size] = Math.max(0, (nextBuyStock[ci.size] || 0) - ci.quantity);
+              }
+            }
+          });
+          return { ...prod, rentStock: nextRentStock, buyStock: nextBuyStock };
+        })
+      );
+
+      const queueCode = generateQueueCode('S');
+      const nowTime = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+      const paidTotal = cartGrandTotal;
+      const appliedCrmDiscount = cartCrmDiscountAmount;
+
+      if (appliedCrmDiscount > 0) {
+        redeemCrmPoints(100, `แลกส่วนลดร้านค้า ${appliedCrmDiscount}฿`);
+        useCrmPointDiscount = false;
+      }
+
+      const earnedPts = earnCrmPoints(paidTotal, `เช่า/ซื้อสินค้าหน้าร้าน (${queueCode})`);
+
+      const newOrder: SwimsuitOrder = {
+        id: `SW-${Math.floor(1000 + Math.random() * 9000)}`,
+        queueCode,
+        customerName,
+        phone: customerPhone,
+        items: [...cartItems],
+        subtotalBeforeDiscount: cartRawTotal,
+        vipDiscountAmount: cartVipDiscountAmount,
+        crmDiscountAmount: appliedCrmDiscount,
+        totalAmount: paidTotal,
+        status: 'paid',
+        createdAt: nowTime
+      };
+
+      swimsuitOrders.update((orders) => [newOrder, ...orders]);
+
+      latestQueueTicket.set({
+        queueCode,
+        serviceTitle: 'รับสินค้าเช่า/ซื้อชุดว่ายน้ำ & ผ้าขนหนู',
+        customerName,
+        detailLine1: `รหัสออเดอร์: ${newOrder.id} (${cartItems.length} รายการ)`,
+        detailLine2: `รับเพิ่ม +${earnedPts} แต้มสะสม CRM`,
+        amountText: `ยอดชำระสุทธิ: ${paidTotal.toLocaleString()} บาท`,
+        timestamp: new Date().toLocaleString('th-TH')
+      });
+
+      const firstItem = cartItems[0];
+      window.dispatchEvent(
+        new CustomEvent('dp-spawn-swimsuit-npc', {
+          detail: {
+            color: firstItem.colorNumber,
+            label: `${customerName} (คิว ${queueCode})`
+          }
+        })
+      );
+
+      cartItems = [];
+      showSwimsuitQrPayment = false;
+      activeHotspot.set(null);
+
+      addToast(
+        `ชำระเงิน QR สำเร็จ! รหัสคิว ${queueCode}`,
+        `ยอด ${paidTotal.toLocaleString()}฿ • รับเพิ่ม +${earnedPts} แต้ม CRM`,
+        'success'
+      );
+    } finally {
+      isConfirmingPayment = false;
+    }
+  }
+
+  function cancelSwimsuitOrder(ord: SwimsuitOrder) {
+    if (ord.status === 'cancelled') return;
+    const penalty = Math.round(ord.totalAmount * 0.2);
+    const refund = ord.totalAmount - penalty;
 
     SWIMSUIT_CATALOG.update((catalog) =>
       catalog.map((prod) => {
-        const nextRentStock = { ...prod.rentStock };
-        const nextBuyStock = { ...prod.buyStock };
-
-        cartItems.forEach((ci) => {
+        const nextRent = { ...prod.rentStock };
+        const nextBuy = { ...prod.buyStock };
+        ord.items.forEach((ci) => {
           if (ci.itemId === prod.id) {
             if (ci.orderType === 'rent') {
-              nextRentStock[ci.size] = Math.max(0, (nextRentStock[ci.size] || 0) - ci.quantity);
+              nextRent[ci.size] = (nextRent[ci.size] || 0) + ci.quantity;
             } else {
-              nextBuyStock[ci.size] = Math.max(0, (nextBuyStock[ci.size] || 0) - ci.quantity);
+              nextBuy[ci.size] = (nextBuy[ci.size] || 0) + ci.quantity;
             }
           }
         });
-        return { ...prod, rentStock: nextRentStock, buyStock: nextBuyStock };
+        return { ...prod, rentStock: nextRent, buyStock: nextBuy };
       })
     );
 
-    const newOrder = {
-      id: `SW-${Math.floor(1000 + Math.random() * 9000)}`,
-      customerName,
-      phone: customerPhone,
-      items: [...cartItems],
-      totalAmount: cartGrandTotal,
-      status: 'paid' as const,
-      createdAt: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.'
-    };
-
-    swimsuitOrders.update((orders) => [newOrder, ...orders]);
-
-    const firstItem = cartItems[0];
-    window.dispatchEvent(
-      new CustomEvent('dp-spawn-swimsuit-npc', {
-        detail: {
-          color: firstItem.colorNumber,
-          label: `${customerName} (${firstItem.orderType === 'rent' ? 'เช่า' : 'ซื้อ'} ×${firstItem.quantity})`
-        }
-      })
+    swimsuitOrders.update((all) =>
+      all.map((o) =>
+        o.id === ord.id
+          ? { ...o, status: 'cancelled', penaltyAmount: penalty, refundAmount: refund }
+          : o
+      )
     );
 
     addToast(
-      'ชำระเงิน QR สำเร็จ! 👙',
-      `รหัส ${newOrder.id} ยอด ${cartGrandTotal.toLocaleString()}฿ • ทำรายการเรียบร้อยแล้ว`,
-      'success'
+      'ยกเลิกรายการหน้าร้านแล้ว',
+      `หักค่าธรรมเนียม 20% (${penalty.toLocaleString()}฿) • คืนเงิน ${refund.toLocaleString()}฿`,
+      'warning'
     );
-
-    cartItems = [];
-    showSwimsuitQrPayment = false;
-    activeHotspot.set(null);
   }
 
   function triggerLifeguardSimulation() {
-    window.dispatchEvent(new CustomEvent('dp-lifeguard-emergency'));
+    activeHotspot.set(null);
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent('dp-lifeguard-emergency'));
+    });
     addToast(
       '🚨 สัญญาณกู้ภัยทำงาน!',
       'ไลฟ์การ์ดกำลังวิ่งรอบสระเพื่อเข้าช่วยเหลือผู้ประสบภัยทันที',
       'warning'
     );
-    activeHotspot.set(null);
   }
 
   function openKidsPoolBooking() {
     bkZone = 'kids';
+    checkinTab = 'book';
     activeHotspot.set('checkin');
   }
 
@@ -433,11 +735,18 @@
   }
 
   function confirmBookingPayment() {
-    const pricePerPerson = bkZone === 'kids' ? 90 : 120;
-    const total = pricePerPerson * bkCount;
-    bookings.update((all) => [
-      {
-        id: `BK-${Math.floor(1000 + Math.random() * 9000)}`,
+    if (isConfirmingPayment) return;
+    isConfirmingPayment = true;
+
+    try {
+      const pricePerPerson = bkZone === 'kids' ? 90 : 120;
+      const total = pricePerPerson * bkCount;
+      const queueCode = generateQueueCode('Q');
+      const bookingId = `BK-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const newBooking: PoolBooking = {
+        id: bookingId,
+        queueCode,
         customerName: bkName,
         phone: bkPhone,
         date: bkDate,
@@ -447,23 +756,113 @@
         totalPrice: total,
         status: 'paid',
         qrRef: `DP-QR-${Math.floor(1000 + Math.random() * 9000)}`
-      },
-      ...all
-    ]);
+      };
+
+      bookings.update((all) => [newBooking, ...all]);
+      const earnedPts = earnCrmPoints(total, `จองรอบสระว่ายน้ำ (${queueCode})`, true);
+
+      latestQueueTicket.set({
+        queueCode,
+        serviceTitle: `จองรอบสระว่ายน้ำ (${bkZone === 'kids' ? 'สระเด็ก' : 'สระหลัก'})`,
+        customerName: bkName,
+        detailLine1: `วันที่ ${bkDate} • รอบ ${bkSlot}`,
+        detailLine2: `ผู้ใช้บริการ ${bkCount} ท่าน • รับ +${earnedPts} แต้ม CRM`,
+        amountText: `ชำระแล้ว: ${total.toLocaleString()} บาท`,
+        timestamp: new Date().toLocaleString('th-TH')
+      });
+
+      showBookingQr = false;
+      activeHotspot.set(null);
+
+      addToast(
+        `จองรอบสระสำเร็จ! รหัสคิว ${queueCode}`,
+        `ยอดชำระ ${total.toLocaleString()} บาท • รับ +${earnedPts} แต้ม CRM`,
+        'success'
+      );
+    } finally {
+      isConfirmingPayment = false;
+    }
+  }
+
+  function handlePoolCheckIn(booking: PoolBooking) {
+    if (booking.status !== 'paid') return;
+    const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+
+    bookings.update((all) =>
+      all.map((b) =>
+        b.id === booking.id ? { ...b, status: 'checked-in', checkedInAt: nowStr } : b
+      )
+    );
+
     poolMetrics.update((m) => ({
       ...m,
       currentSwimmers:
-        bkZone === 'kids'
+        booking.poolZone === 'kids'
           ? m.currentSwimmers
-          : Math.min(m.maxCapacity, m.currentSwimmers + bkCount),
+          : Math.min(m.maxCapacity, m.currentSwimmers + booking.memberCount),
       kidsPoolSwimmers:
-        bkZone === 'kids'
-          ? Math.min(KIDS_POOL_MAX_CAPACITY, m.kidsPoolSwimmers + bkCount)
+        booking.poolZone === 'kids'
+          ? Math.min(KIDS_POOL_MAX_CAPACITY, m.kidsPoolSwimmers + booking.memberCount)
           : m.kidsPoolSwimmers
     }));
-    showBookingQr = false;
-    addToast('จองรอบสระสำเร็จ!', `เช็คอิน ${bkCount} ท่าน ยอดชำระ ${total} บาท`, 'success');
-    activeHotspot.set(null);
+
+    addToast(
+      `เช็คอินเข้าสระสำเร็จ (คิว ${booking.queueCode})`,
+      `${booking.customerName} (${booking.memberCount} ท่าน) เข้าใช้บริการเวลา ${nowStr}`,
+      'success'
+    );
+  }
+
+  function handlePoolCheckOut(booking: PoolBooking) {
+    if (booking.status !== 'checked-in') return;
+    const nowStr = new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+
+    bookings.update((all) =>
+      all.map((b) =>
+        b.id === booking.id ? { ...b, status: 'checked-out', checkedOutAt: nowStr } : b
+      )
+    );
+
+    poolMetrics.update((m) => ({
+      ...m,
+      currentSwimmers:
+        booking.poolZone === 'kids'
+          ? m.currentSwimmers
+          : Math.max(0, m.currentSwimmers - booking.memberCount),
+      kidsPoolSwimmers:
+        booking.poolZone === 'kids'
+          ? Math.max(0, m.kidsPoolSwimmers - booking.memberCount)
+          : m.kidsPoolSwimmers
+    }));
+
+    addToast(
+      `เช็คเอาท์ออกจากสระสำเร็จ (คิว ${booking.queueCode})`,
+      `${booking.customerName} คืนสายรัดข้อมือ RFID เวลา ${nowStr} เรียบร้อย`,
+      'info'
+    );
+  }
+
+  function cancelPoolBooking(booking: PoolBooking) {
+    if (booking.status !== 'paid') {
+      addToast('ไม่สามารถยกเลิกได้', 'รายการนี้เช็คอินแล้วหรือถูกยกเลิกไปแล้ว', 'warning');
+      return;
+    }
+    const penalty = Math.round(booking.totalPrice * 0.2);
+    const refund = booking.totalPrice - penalty;
+
+    bookings.update((all) =>
+      all.map((b) =>
+        b.id === booking.id
+          ? { ...b, status: 'cancelled', penaltyAmount: penalty, refundAmount: refund }
+          : b
+      )
+    );
+
+    addToast(
+      `ยกเลิกการจอง ${booking.id} แล้ว`,
+      `หักค่าธรรมเนียมยกเลิก 20% (${penalty.toLocaleString()}฿) • คืนเงิน ${refund.toLocaleString()}฿`,
+      'warning'
+    );
   }
 
   function proceedToCourseQr() {
@@ -487,10 +886,17 @@
   }
 
   function confirmCoursePayment() {
-    const total = selectedCourseObj.price * crCount;
-    courseRegistrations.update((all) => [
-      {
-        id: `CR-${Math.floor(1000 + Math.random() * 9000)}`,
+    if (isConfirmingPayment) return;
+    isConfirmingPayment = true;
+
+    try {
+      const total = selectedCourseObj.price * crCount;
+      const queueCode = generateQueueCode('C');
+      const regId = `CR-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const newCourse: CourseRegistration = {
+        id: regId,
+        queueCode,
         studentName: crStudent,
         phone: crPhone,
         courseName: selectedCourseObj.name,
@@ -499,16 +905,52 @@
         memberCount: crCount,
         totalPrice: total,
         status: 'paid'
-      },
-      ...all
-    ]);
-    showCourseQr = false;
-    addToast(
-      'สมัครคอร์สเรียนสำเร็จ!',
-      `${crStudent} (${crCount} ท่าน) ชำระ ${total.toLocaleString()}฿ ผ่าน QR แล้ว`,
-      'success'
+      };
+
+      courseRegistrations.update((all) => [newCourse, ...all]);
+      const earnedPts = earnCrmPoints(total, `สมัครคอร์ส ${selectedCourseObj.name}`);
+
+      latestQueueTicket.set({
+        queueCode,
+        serviceTitle: `สมัครคอร์สเรียน: ${selectedCourseObj.name}`,
+        customerName: crStudent,
+        detailLine1: `ผู้สอน: ${selectedCourseObj.instructor} (${crCount} ท่าน)`,
+        detailLine2: `ตารางเรียน: ${selectedCourseObj.schedule} • รับ +${earnedPts} แต้ม CRM`,
+        amountText: `ชำระแล้ว: ${total.toLocaleString()} บาท`,
+        timestamp: new Date().toLocaleString('th-TH')
+      });
+
+      showCourseQr = false;
+      activeHotspot.set(null);
+
+      addToast(
+        `สมัครคอร์สเรียนสำเร็จ! รหัสคิว ${queueCode}`,
+        `${crStudent} (${crCount} ท่าน) • รับเพิ่ม +${earnedPts} แต้ม CRM`,
+        'success'
+      );
+    } finally {
+      isConfirmingPayment = false;
+    }
+  }
+
+  function cancelCourseRegistration(reg: CourseRegistration) {
+    if (reg.status === 'cancelled') return;
+    const penalty = Math.round(reg.totalPrice * 0.2);
+    const refund = reg.totalPrice - penalty;
+
+    courseRegistrations.update((all) =>
+      all.map((c) =>
+        c.id === reg.id
+          ? { ...c, status: 'cancelled', penaltyAmount: penalty, refundAmount: refund }
+          : c
+      )
     );
-    activeHotspot.set(null);
+
+    addToast(
+      `ยกเลิกคอร์สเรียน ${reg.id} แล้ว`,
+      `หักค่าธรรมเนียมยกเลิก 20% (${penalty.toLocaleString()}฿) • คืนเงิน ${refund.toLocaleString()}฿`,
+      'warning'
+    );
   }
 
   function openLockerQrPayment(locker: LockerItem) {
@@ -517,27 +959,100 @@
   }
 
   function confirmLockerQrPayment() {
-    if (!selectedLockerForQr) return;
-    const targetLocker = selectedLockerForQr;
+    if (isConfirmingPayment || !selectedLockerForQr) return;
+    isConfirmingPayment = true;
+
+    try {
+      const targetLocker = selectedLockerForQr;
+      const queueCode = generateQueueCode('L');
+      const finalPrice = isUserVip ? 0 : targetLocker.price;
+
+      const expireTime = new Date(Date.now() + LOCKER_DURATION_HOURS * 60 * 60 * 1000);
+      const reservedUntilStr =
+        expireTime.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) + ' น.';
+
+      lockers.update((all) =>
+        all.map((l) =>
+          l.id === targetLocker.id
+            ? {
+                ...l,
+                status: 'reserved',
+                reservedBy: lockerCustomerName.trim() || 'สมาชิกสระว่ายน้ำ',
+                queueCode,
+                paidAmount: finalPrice,
+                isVipFree: isUserVip,
+                durationHours: LOCKER_DURATION_HOURS,
+                reservedUntil: reservedUntilStr
+              }
+            : l
+        )
+      );
+
+      lastReservedLockerBanner = {
+        number: targetLocker.number,
+        zone: targetLocker.zone,
+        queueCode,
+        reservedUntil: reservedUntilStr
+      };
+
+      const earnedPts = earnCrmPoints(Math.max(50, finalPrice), `จองตู้ล็อกเกอร์ ${targetLocker.number} (${LOCKER_DURATION_HOURS} ชม.)`);
+
+      latestQueueTicket.set({
+        queueCode,
+        serviceTitle: `จองล็อกเกอร์ ${targetLocker.number} (ใช้งานได้ ${LOCKER_DURATION_HOURS} ชม.)`,
+        customerName: lockerCustomerName.trim() || 'สมาชิกสระว่ายน้ำ',
+        detailLine1: `ตู้ ${targetLocker.number} ถูกล็อกไว้ให้คุณ ${LOCKER_DURATION_HOURS} ชั่วโมง (ถึง ${reservedUntilStr})`,
+        detailLine2: `${isUserVip ? 'สิทธิ์ VIP จองฟรี' : 'เชื่อม RFID แล้ว'} • รับ +${earnedPts} แต้ม CRM`,
+        amountText: isUserVip ? 'ยอดชำระ: 0 บาท (VIP FREE)' : `ชำระแล้ว: ${finalPrice} บาท`,
+        timestamp: new Date().toLocaleString('th-TH')
+      });
+
+      selectedLockerForQr = null;
+
+      addToast(
+        'จองล็อกเกอร์สำเร็จ! 🔐',
+        `ตู้ ${targetLocker.number} (${targetLocker.zone}) ถูกล็อกไว้ให้คุณ ${LOCKER_DURATION_HOURS} ชั่วโมง (ถึงเวลา ${reservedUntilStr})`,
+        'success'
+      );
+    } finally {
+      isConfirmingPayment = false;
+    }
+  }
+
+  function cancelLockerReservation(locker: LockerItem) {
+    if (locker.status !== 'reserved') return;
+    const paid = locker.paidAmount ?? 0;
+    const penalty = Math.round(paid * 0.2);
+    const refund = paid - penalty;
 
     lockers.update((all) =>
       all.map((l) =>
-        l.id === targetLocker.id
+        l.id === locker.id
           ? {
               ...l,
-              status: 'reserved',
-              reservedBy: lockerCustomerName.trim() || 'สมาชิกสระว่ายน้ำ'
+              status: 'available',
+              reservedBy: undefined,
+              queueCode: undefined,
+              paidAmount: undefined,
+              isVipFree: undefined,
+              durationHours: undefined,
+              reservedUntil: undefined
             }
           : l
       )
     );
 
+    if (lastReservedLockerBanner?.number === locker.number) {
+      lastReservedLockerBanner = null;
+    }
+
     addToast(
-      'ชำระเงิน & จองล็อกเกอร์สำเร็จ! 🔐',
-      `ตู้ ${targetLocker.number} (${targetLocker.zone}) ยอด ${targetLocker.price}฿ เชื่อมสายรัดข้อมือ RFID แล้ว`,
-      'success'
+      `ยกเลิกจองตู้ ${locker.number} แล้ว`,
+      paid > 0
+        ? `หักค่าธรรมเนียม 20% (${penalty}฿) • คืนเงิน ${refund}฿`
+        : 'คืนสถานะตู้ว่างเรียบร้อย (สิทธิ์ VIP ฟรีไม่มีค่าปรับ)',
+      'warning'
     );
-    selectedLockerForQr = null;
   }
 
   function closeModal() {
@@ -545,6 +1060,8 @@
     showSwimsuitQrPayment = false;
     showBookingQr = false;
     showCourseQr = false;
+    showVipQr = false;
+    confirmCancelVip = false;
     selectedLockerForQr = null;
   }
 </script>
@@ -558,7 +1075,6 @@
   input[type="number"] {
     -moz-appearance: textfield;
   }
-  /* กำหนดรูปแบบการแสดงผลช่องเลือกวันที่ให้เป็น DD/MM/YYYY บนเบราว์เซอร์รองรับ */
   input[type="date"]::-webkit-datetime-edit-year-field {
     order: 3;
   }
@@ -588,6 +1104,7 @@
         <div class="flex items-center gap-3">
           <span class="text-2xl">
             {#if $activeHotspot === 'swimwear'}👙
+            {:else if $activeHotspot === 'vip'}👑
             {:else if $activeHotspot === 'restroom'}🚿
             {:else if $activeHotspot === 'checkin'}🎟️
             {:else if $activeHotspot === 'locker'}🔐
@@ -599,17 +1116,19 @@
           <div>
             <h2 class="text-lg font-bold text-white">
               {#if $activeHotspot === 'swimwear'}
-                ระบบจองเช่าและซื้อชุดว่ายน้ำ (Swimwear Rental & Pro Shop)
+                ระบบจองเช่าและซื้อชุดว่ายน้ำ & ผ้าขนหนู (Swimwear & Towel Pro Shop)
+              {:else if $activeHotspot === 'vip'}
+                ระบบสมาชิก VIP & แต้มสะสม CRM (Loyalty & Membership)
               {:else if $activeHotspot === 'restroom'}
                 โซนห้องน้ำ & ห้องเปลี่ยนชุดว่ายน้ำ (SHOWER ROOMS)
               {:else if $activeHotspot === 'checkin'}
-                ระบบจองรอบสระว่ายน้ำ & เช็คอิน QR / RFID
+                ระบบจองรอบสระว่ายน้ำ • เช็คอิน / เช็คเอาท์ & บัตรคิว
               {:else if $activeHotspot === 'locker'}
-                ระบบจองตู้ล็อกเกอร์อัจฉริยะ (Smart Lockers)
+                ระบบจองตู้ล็อกเกอร์อัจฉริยะ 30 ตู้ (จำกัดเวลา 4 ชม./ครั้ง)
               {:else if $activeHotspot === 'courses'}
                 ระบบสมัครคอร์สเรียนว่ายน้ำ & ตารางครูฝึก
               {:else if $activeHotspot === 'water'}
-                เซ็นเซอร์ตรวจวัดคุณภาพน้ำ Real-time IoT
+                เซ็นเซอร์ตรวจวัดคุณภาพน้ำ Real-time IoT (Admin Only)
               {:else if $activeHotspot === 'kids-pool'}
                 โซนสระเด็ก (Kids Pool & Safety Zone)
               {:else}
@@ -617,7 +1136,7 @@
               {/if}
             </h2>
             <p class="text-xs text-cyan-300/80">
-              Digital Pools Smart Aquatics Platform • รองรับการชำระเงินผ่าน QR Code
+              Digital Pools Smart Aquatics Platform • รองรับการชำระเงินผ่าน QR Code & บัตรคิว JPG
             </p>
           </div>
         </div>
@@ -631,8 +1150,294 @@
       </div>
 
       <!-- Body Content -->
-      <div class="max-h-[80vh] overflow-y-auto p-6">
-        {#if $activeHotspot === 'swimwear'}
+      <div class="max-h-[78vh] overflow-y-auto p-6">
+        {#if $activeHotspot === 'vip'}
+          <!-- ==================== บัตรสะสมแต้ม CRM (สำหรับ User ทุกระดับ) + ระบบสมาชิก VIP ==================== -->
+          {#if !showVipQr}
+            <div class="space-y-5">
+              <div class="rounded-2xl border border-cyan-500/40 bg-gradient-to-br from-slate-800/90 via-cyan-950/40 to-slate-900 p-4 space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div class="text-xs font-bold text-cyan-300">🎖️ บัตรสะสมแต้มดิจิทัล & CRM (สำหรับผู้ใช้บริการทุกระดับ)</div>
+                    <div class="text-base font-extrabold text-white mt-0.5">
+                      ระดับปัจจุบัน: <span class="text-amber-300">{$crmTierStatus.rank}</span> • แต้มคงเหลือ <span class="text-emerald-400">{$crmProfile.points.toLocaleString()} แต้ม</span>
+                    </div>
+                  </div>
+                  <div class="text-right text-xs">
+                    <div class="text-slate-300">เข้าใช้บริการแล้ว <strong class="text-white">{$crmProfile.visitCount} ครั้ง</strong></div>
+                    <div class="text-[11px] text-cyan-300">ทุก 10 บาท = 1 แต้ม • 100 แต้ม แลกส่วนลดร้านค้า 50฿</div>
+                  </div>
+                </div>
+
+                <div class="space-y-1">
+                  <div class="flex justify-between text-[11px]">
+                    <span class="text-slate-300">
+                      ความคืบหน้าสู่ระดับ <strong class="text-amber-300">{$crmTierStatus.nextRank}</strong>
+                    </span>
+                    <span class="text-cyan-300 font-semibold">
+                      {$crmTierStatus.rank === 'Platinum'
+                        ? 'ระดับสูงสุดแล้ว (Platinum)'
+                        : `อีก ${$crmTierStatus.pointsToNext} แต้ม (${$crmTierStatus.progressPercent}%)`}
+                    </span>
+                  </div>
+                  <div class="h-2.5 w-full rounded-full bg-slate-800 overflow-hidden border border-slate-700">
+                    <div
+                      class="h-full rounded-full bg-gradient-to-r from-cyan-400 via-sky-400 to-amber-400 transition-all duration-300"
+                      style="width: {$crmTierStatus.progressPercent}%;"
+                    ></div>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap gap-1.5 pt-1">
+                  {#each $crmProfile.transactions.slice(0, 3) as tx}
+                    <span
+                      class="rounded-lg px-2.5 py-1 text-[11px] border {tx.type === 'earn'
+                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                        : 'bg-amber-500/15 border-amber-500/30 text-amber-300'}"
+                    >
+                      {tx.type === 'earn' ? `+${tx.points}` : `-${tx.points}`} แต้ม • {tx.title}
+                    </span>
+                  {/each}
+                </div>
+              </div>
+
+              {#if isUserVip && $activeVipMembership}
+                {@const vipPenalty = Math.round($activeVipMembership.price * 0.2)}
+                {@const vipRefund = $activeVipMembership.price - vipPenalty}
+                <div class="rounded-2xl border border-amber-400/50 bg-gradient-to-r from-amber-950/60 via-slate-900 to-amber-950/40 p-4 space-y-3">
+                  <div class="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div class="text-xs font-bold text-amber-400">👑 สถานะสมาชิก VIP ปัจจุบันของคุณ (สมัครเรียบร้อยแล้ว)</div>
+                      <div class="text-base font-extrabold text-white mt-0.5">
+                        {$activeVipMembership.tierName} ({$activeVipMembership.billingCycle === 'monthly' ? 'รายเดือน' : 'รายปี'}) • รหัสคิว {$activeVipMembership.queueCode}
+                      </div>
+                      <div class="text-xs text-slate-300 mt-1">
+                        สิทธิประโยชน์: <strong>จองล็อกเกอร์ฟรีทุกโซน (รวมโซน C VIP)</strong> • <strong>ส่วนลดร้านค้า {$activeVipMembership.discountPercent}%</strong> (ยกเว้น 7/11) • หมดอายุ {$activeVipMembership.expiresAt}
+                      </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        on:click={() =>
+                          $activeVipMembership &&
+                          downloadQueueTicketJpg({
+                            queueCode: $activeVipMembership.queueCode,
+                            serviceTitle: `บัตรสมาชิก ${$activeVipMembership.tierName}`,
+                            customerName: $activeVipMembership.ownerName,
+                            detailLine1: `สมาชิก: ${$activeVipMembership.familyMembers.join(', ')}`,
+                            detailLine2: `ส่วนลดร้านค้า ${$activeVipMembership.discountPercent}% + จองล็อกเกอร์ฟรี`,
+                            amountText: `ค่าสมัคร: ${$activeVipMembership.price.toLocaleString()} บาท`,
+                            timestamp: $activeVipMembership.expiresAt
+                          })}
+                        class="rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold px-4 py-2 text-xs cursor-pointer"
+                      >
+                        📥 โหลดบัตรคิว VIP (.JPG)
+                      </button>
+
+                      {#if !confirmCancelVip}
+                        <button
+                          type="button"
+                          on:click={() => (confirmCancelVip = true)}
+                          class="rounded-xl border border-rose-500/50 bg-rose-950/60 hover:bg-rose-600 text-rose-200 hover:text-white font-bold px-3.5 py-2 text-xs transition cursor-pointer"
+                        >
+                          ยกเลิกสมาชิก VIP (หัก 20%)
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+
+                  {#if confirmCancelVip}
+                    <div class="rounded-xl border border-rose-500/50 bg-rose-950/50 p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div class="text-rose-200">
+                        ⚠️ ยืนยันการยกเลิก <strong>{$activeVipMembership.tierName}</strong> (ยอดชำระ {$activeVipMembership.price.toLocaleString()}฿):
+                        ระบบจะ<strong>หักค่าธรรมเนียม 20% ({vipPenalty.toLocaleString()}฿)</strong> และคืนเงิน <strong class="text-emerald-300">{vipRefund.toLocaleString()}฿</strong>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <button
+                          type="button"
+                          on:click={() => (confirmCancelVip = false)}
+                          class="rounded-lg bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-slate-200 font-semibold cursor-pointer"
+                        >
+                          ไม่ยกเลิก
+                        </button>
+                        <button
+                          type="button"
+                          on:click={cancelVipMembership}
+                          class="rounded-lg bg-rose-600 hover:bg-rose-500 px-3.5 py-1.5 text-white font-extrabold cursor-pointer"
+                        >
+                          ยืนยันยกเลิก (หัก 20%)
+                        </button>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+
+              <div class="grid grid-cols-2 gap-2 rounded-xl bg-slate-800/90 p-1.5 border border-slate-700 max-w-md mx-auto">
+                <button
+                  type="button"
+                  disabled={isUserVip}
+                  on:click={() => (selectedVipCycle = 'monthly')}
+                  class="rounded-lg py-2 text-xs font-bold transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer {selectedVipCycle === 'monthly'
+                    ? 'bg-amber-400 text-slate-950 shadow'
+                    : 'text-slate-300 hover:text-white'}"
+                >
+                  📅 สมัครรายเดือน (Monthly)
+                </button>
+                <button
+                  type="button"
+                  disabled={isUserVip}
+                  on:click={() => (selectedVipCycle = 'yearly')}
+                  class="rounded-lg py-2 text-xs font-bold transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer {selectedVipCycle === 'yearly'
+                    ? 'bg-amber-400 text-slate-950 shadow'
+                    : 'text-slate-300 hover:text-white'}"
+                >
+                  🌟 สมัครรายปี (Yearly สุดคุ้ม)
+                </button>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {#each vipPackages as pkg}
+                  {@const displayPrice =
+                    selectedVipCycle === 'monthly' ? pkg.monthlyPrice : pkg.yearlyPrice}
+                  <button
+                    type="button"
+                    disabled={isUserVip}
+                    on:click={() => (selectedVipTier = pkg.tier)}
+                    class="text-left rounded-2xl p-4 border transition disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer flex flex-col justify-between {selectedVipTier === pkg.tier
+                      ? 'border-amber-400 bg-amber-950/30 ring-2 ring-amber-400/30'
+                      : 'border-slate-700 bg-slate-800/60 hover:border-slate-500'}"
+                  >
+                    <div>
+                      <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                          สูงสุด {pkg.maxMembers} คน
+                        </span>
+                        <span class="text-xs font-extrabold text-emerald-400">
+                          ลด {pkg.discountPercent}%
+                        </span>
+                      </div>
+                      <div class="mt-3 text-base font-extrabold text-white">{pkg.name}</div>
+                      <div class="mt-2 text-2xl font-black text-amber-300">
+                        {displayPrice.toLocaleString()} ฿
+                        <span class="text-xs font-normal text-slate-400">
+                          / {selectedVipCycle === 'monthly' ? 'เดือน' : 'ปี'}
+                        </span>
+                      </div>
+                      <p class="mt-2 text-xs text-slate-300 leading-relaxed">{pkg.subtitle}</p>
+                    </div>
+                    <div class="mt-4 pt-3 border-t border-slate-700/70 text-[11px] text-cyan-300 space-y-1">
+                      <div>✓ จองตู้ล็อกเกอร์ฟรีทุกโซน (A, B, C VIP)</div>
+                      <div>✓ ส่วนลดเช่า/ซื้อชุดว่ายน้ำ & ผ้าขนหนู {pkg.discountPercent}%</div>
+                      <div class="text-slate-400">* ยกเว้นสินค้าในร้าน 7-Eleven</div>
+                    </div>
+                  </button>
+                {/each}
+              </div>
+
+              <div class="rounded-2xl border border-slate-700 bg-slate-800/50 p-4 space-y-3">
+                <h3 class="text-sm font-bold text-white">
+                  {isUserVip ? '✅ คุณมีสถานะสมาชิก VIP ใช้งานอยู่แล้ว (หากต้องการเปลี่ยนแพ็กเกจ กรุณายกเลิกแพ็กเกจเดิมก่อน)' : `ข้อมูลผู้สมัคร ${activeVipPkg.name}`}
+                </h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label for="vip-owner" class="block text-xs text-slate-400 mb-1">ชื่อ-นามสกุล ผู้สมัครหลัก</label>
+                    <input
+                      id="vip-owner"
+                      type="text"
+                      disabled={isUserVip}
+                      bind:value={vipOwnerName}
+                      class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white disabled:opacity-50"
+                    />
+                  </div>
+                  <div>
+                    <label for="vip-phone" class="block text-xs text-slate-400 mb-1">เบอร์โทรศัพท์ติดต่อ</label>
+                    <input
+                      id="vip-phone"
+                      type="text"
+                      disabled={isUserVip}
+                      bind:value={vipPhone}
+                      class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-white disabled:opacity-50"
+                    />
+                  </div>
+                </div>
+
+                {#if activeVipPkg.maxMembers > 1}
+                  <div class="space-y-2 pt-1">
+                    <div class="text-xs font-semibold text-amber-300">
+                      รายชื่อสมาชิกเพิ่มเติมในแพ็กเกจ (เพิ่มได้อีกสูงสุด {activeVipPkg.maxMembers - 1} ท่าน)
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {#each Array(activeVipPkg.maxMembers - 1) as _, idx}
+                        <input
+                          type="text"
+                          disabled={isUserVip}
+                          placeholder={`สมาชิกคนที่ ${idx + 2} (ระบุชื่อ-นามสกุล)`}
+                          bind:value={vipMemberNames[idx]}
+                          class="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+                        />
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+
+                {#if isUserVip && $activeVipMembership}
+                  <button
+                    type="button"
+                    disabled
+                    class="w-full rounded-xl bg-slate-700 text-amber-300 border border-amber-400/40 font-extrabold py-3 text-sm cursor-not-allowed"
+                  >
+                    👑 สมัครสมาชิก VIP แล้ว ({$activeVipMembership.tierName} • หมดอายุ {$activeVipMembership.expiresAt})
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    on:click={proceedToVipQr}
+                    class="w-full rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-extrabold py-3 text-sm shadow-lg cursor-pointer"
+                  >
+                    👑 ชำระค่าสมัคร {activeVipPkg.name} ผ่าน QR Code ({activeVipPrice.toLocaleString()} ฿)
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {:else}
+            <div class="text-center space-y-4 max-w-sm mx-auto py-2">
+              <div class="inline-block rounded-full bg-amber-500/20 px-3.5 py-1 text-xs font-bold text-amber-300">
+                สแกน QR Code สมัครสมาชิก VIP
+              </div>
+              <div class="text-xs text-slate-300">
+                แพ็กเกจ: <strong class="text-white">{activeVipPkg.name}</strong> ({selectedVipCycle === 'monthly' ? 'รายเดือน' : 'รายปี'})<br />
+                ยอดชำระสุทธิ: <strong class="text-emerald-400 text-base">{activeVipPrice.toLocaleString()} บาท</strong>
+              </div>
+              <div class="mx-auto w-52 h-52 rounded-2xl bg-white p-3 flex items-center justify-center border-4 border-amber-400 shadow-xl">
+                {#if !qrImageLoadError}
+                  <img src={PAYMENT_QR_IMAGE_URL} alt="VIP QR" class="w-full h-full object-contain" on:error={handleQrImgError} />
+                {:else}
+                  <span class="text-xs text-slate-700 font-semibold">วางรูป QR ที่ public/my-qrcode.png</span>
+                {/if}
+              </div>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  on:click={() => (showVipQr = false)}
+                  class="flex-1 rounded-xl bg-slate-800 py-2.5 text-xs font-semibold cursor-pointer"
+                >
+                  ← แก้ไขแพ็กเกจ
+                </button>
+                <button
+                  type="button"
+                  disabled={isConfirmingPayment || isUserVip}
+                  on:click|stopPropagation={confirmVipPayment}
+                  class="flex-1 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-extrabold py-2.5 text-xs cursor-pointer"
+                >
+                  ✅ ยืนยันชำระเงิน VIP
+                </button>
+              </div>
+            </div>
+          {/if}
+
+        {:else if $activeHotspot === 'swimwear'}
+          <!-- ==================== ร้านเช่าและซื้อชุดว่ายน้ำ & ผ้าขนหนู ==================== -->
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div class="lg:col-span-7 space-y-4">
               <div class="grid grid-cols-2 gap-2 rounded-xl bg-slate-800/90 p-1.5 border border-slate-700">
@@ -643,7 +1448,7 @@
                     ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg'
                     : 'text-slate-300 hover:text-white'}"
                 >
-                  🔄 เช่าอุปกรณ์/ชุด (Rent)
+                  🔄 เช่าอุปกรณ์/ชุด/ผ้าขนหนู (Rent)
                 </button>
                 <button
                   type="button"
@@ -652,7 +1457,7 @@
                     ? 'bg-gradient-to-r from-pink-500 to-rose-600 text-white shadow-lg'
                     : 'text-slate-300 hover:text-white'}"
                 >
-                  🛍️ ซื้ออุปกรณ์/ชุด (Buy)
+                  🛍️ ซื้ออุปกรณ์/ชุด/ผ้าขนหนู (Buy)
                 </button>
               </div>
 
@@ -713,10 +1518,10 @@
                 <div class="rounded-xl border border-slate-700/80 bg-slate-800/60 p-4 space-y-3">
                   <div class="flex flex-wrap items-center justify-between gap-2">
                     <span class="text-sm font-semibold text-cyan-300">
-                      📏 {isGearItem ? 'ขนาดมาตรฐาน (Free Size ปรับสายได้)' : `เลือกไซส์ (${selectedOrderType === 'rent' ? 'โหมดเช่า' : 'โหมดซื้อ'})`} — {currentCatalogItem.name}
+                      📏 {isFreeSizeItem ? 'ขนาดมาตรฐาน (Free Size)' : `เลือกไซส์ (${selectedOrderType === 'rent' ? 'โหมดเช่า' : 'โหมดซื้อ'})`} — {currentCatalogItem.name}
                     </span>
                     <span class="text-xs text-slate-300">
-                      {isGearItem ? 'ฟรีไซส์ (ปรับระดับได้)' : `รอบอก: ${SIZE_PRICE_MODIFIERS[selectedSize].chest}`}
+                      {isFreeSizeItem ? 'ฟรีไซส์มาตรฐาน' : `รอบอก: ${SIZE_PRICE_MODIFIERS[selectedSize].chest}`}
                     </span>
                   </div>
 
@@ -742,10 +1547,16 @@
                     </div>
                   {/if}
 
-                  {#if isGearItem}
+                  {#if isFreeSizeItem}
                     <div class="rounded-xl border border-cyan-500/40 bg-cyan-950/30 p-3 text-xs text-cyan-200 flex items-center justify-between">
-                      <span>🥽 แว่นตาและหมวกว่ายน้ำ: <strong>ขนาดมาตรฐาน (Free Size) ปรับสายรัดซิลิโคนได้ตามขนาดศีรษะ</strong></span>
-                      <span class="font-bold text-emerald-400">เหลือ {getRemainingSizeStock(currentCatalogItem, 'M', selectedOrderType)} ชิ้น</span>
+                      <span>
+                        {currentCatalogItem.category === 'towel'
+                          ? '🧣 ผ้าขนหนูไมโครไฟเบอร์ขนาดมาตรฐาน 70×140 ซม. ผ่านการฆ่าเชื้ออบโอโซนทุกผืน'
+                          : '🥽 แว่นตาและหมวกว่ายน้ำ: ขนาดมาตรฐาน (Free Size) ปรับสายรัดซิลิโคนได้ตามขนาดศีรษะ'}
+                      </span>
+                      <span class="font-bold text-emerald-400 shrink-0 ml-2">
+                        เหลือ {getRemainingSizeStock(currentCatalogItem, 'M', selectedOrderType)} ชิ้น
+                      </span>
                     </div>
                   {:else}
                     <div class="grid grid-cols-4 sm:grid-cols-7 gap-2">
@@ -775,7 +1586,7 @@
                     <div class="flex flex-wrap items-center justify-between gap-2">
                       <div>
                         <label for="suit-qty" class="block text-xs font-bold text-white">
-                          จำนวนที่ต้องการ{selectedOrderType === 'rent' ? 'เช่า' : 'ซื้อ'} ({isGearItem ? 'Free Size' : `ไซส์ ${selectedSize}`})
+                          จำนวนที่ต้องการ{selectedOrderType === 'rent' ? 'เช่า' : 'ซื้อ'} ({isFreeSizeItem ? 'Free Size' : `ไซส์ ${selectedSize}`})
                         </label>
                         <div class="mt-1 flex items-center gap-1.5">
                           {#if remainingStockForSelection > 0}
@@ -825,12 +1636,6 @@
                       </div>
                     </div>
 
-                    {#if remainingStockForSelection <= 0}
-                      <div class="rounded-lg border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-xs font-bold text-rose-300 text-center">
-                        ❌ สินค้าหมด — ไม่มีสินค้าในสต็อก
-                      </div>
-                    {/if}
-
                     <div class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-2.5">
                       <div class="text-xs">
                         <div class="text-slate-300">
@@ -871,6 +1676,11 @@
                 <div class="space-y-4">
                   <div class="flex items-center justify-between border-b border-slate-700 pb-2">
                     <h3 class="font-bold text-sm text-white">🛒 รายการที่เลือก ({cartItems.length})</h3>
+                    {#if $vipDiscountPercent > 0}
+                      <span class="rounded-full bg-amber-500/20 border border-amber-400/40 px-2.5 py-0.5 text-[10px] font-bold text-amber-300">
+                        👑 VIP ลด {$vipDiscountPercent}%
+                      </span>
+                    {/if}
                   </div>
 
                   <div class="grid grid-cols-2 gap-2">
@@ -894,13 +1704,31 @@
                     </div>
                   </div>
 
+                  <div class="rounded-xl border border-cyan-500/30 bg-slate-900/80 p-2.5 flex items-center justify-between gap-2 text-xs">
+                    <div>
+                      <div class="font-bold text-cyan-300">🎖️ แต้มสะสม CRM: {$crmProfile.points} แต้ม</div>
+                      <div class="text-[11px] text-slate-400">ใช้ 100 แต้ม ลดเพิ่ม 50 บาท (ยกเว้น 7/11)</div>
+                    </div>
+                    <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        disabled={!canRedeemCrm}
+                        bind:checked={useCrmPointDiscount}
+                        class="rounded accent-cyan-400"
+                      />
+                      <span class="font-bold {canRedeemCrm ? 'text-emerald-400' : 'text-slate-500'}">
+                        {canRedeemCrm ? 'ใช้ส่วนลด 50฿' : 'แต้มไม่พอ'}
+                      </span>
+                    </label>
+                  </div>
+
                   {#if cartItems.length === 0}
-                    <div class="rounded-xl border border-dashed border-slate-700 p-6 text-center text-xs text-slate-400">
+                    <div class="rounded-xl border border-dashed border-slate-700 p-5 text-center text-xs text-slate-400">
                       ยังไม่มีรายการในตะกร้า<br />
-                      เลือกสินค้า สี ไซส์ จำนวน แล้วกด <strong>"+ เพิ่มลงรายการ"</strong> หรือกดปุ่มชำระเงินด้านล่างได้เลย
+                      เลือกชุดว่ายน้ำหรือผ้าขนหนู สี ไซส์ จำนวน แล้วกด <strong>"+ เพิ่มลงรายการ"</strong>
                     </div>
                   {:else}
-                    <div class="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    <div class="space-y-2 max-h-44 overflow-y-auto pr-1">
                       {#each cartItems as item}
                         <div class="rounded-lg border border-slate-700 bg-slate-900/90 p-3 flex items-center justify-between gap-2">
                           <div class="text-xs">
@@ -945,16 +1773,73 @@
                       {/each}
                     </div>
                   {/if}
+
+                  {#if $swimsuitOrders.length > 0}
+                    <div class="border-t border-slate-700/80 pt-2 space-y-1.5 max-h-32 overflow-y-auto">
+                      <div class="text-[11px] font-bold text-slate-300">ประวัติรายการหน้าร้าน & บัตรคิว</div>
+                      {#each $swimsuitOrders as ord}
+                        <div class="rounded-lg border border-slate-800 bg-slate-900/70 p-2 text-[11px] flex items-center justify-between gap-2">
+                          <div>
+                            <span class="font-bold text-cyan-300">[{ord.queueCode}]</span>
+                            <span class="text-white ml-1">{ord.totalAmount.toLocaleString()}฿</span>
+                            {#if ord.status === 'cancelled'}
+                              <span class="text-rose-400 ml-1">(ยกเลิกแล้ว หัก 20%)</span>
+                            {/if}
+                          </div>
+                          {#if ord.status !== 'cancelled'}
+                            <div class="flex items-center gap-1">
+                              <button
+                                type="button"
+                                on:click={() =>
+                                  downloadQueueTicketJpg({
+                                    queueCode: ord.queueCode,
+                                    serviceTitle: 'รับสินค้าเช่า/ซื้อชุดว่ายน้ำ & ผ้าขนหนู',
+                                    customerName: ord.customerName,
+                                    detailLine1: `รหัสออเดอร์: ${ord.id}`,
+                                    detailLine2: `จำนวน ${ord.items.length} รายการ`,
+                                    amountText: `ยอดชำระสุทธิ: ${ord.totalAmount.toLocaleString()} บาท`,
+                                    timestamp: ord.createdAt
+                                  })}
+                                class="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 cursor-pointer"
+                              >
+                                คิว JPG
+                              </button>
+                              <button
+                                type="button"
+                                on:click={() => cancelSwimsuitOrder(ord)}
+                                class="px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 cursor-pointer"
+                              >
+                                ยกเลิก (-20%)
+                              </button>
+                            </div>
+                          {/if}
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
                 </div>
 
-                <div class="border-t border-slate-700 pt-3 space-y-3">
+                <div class="border-t border-slate-700 pt-3 space-y-2">
+                  {#if $vipDiscountPercent > 0}
+                    <div class="flex items-center justify-between text-xs text-amber-300">
+                      <span>ส่วนลดสมาชิก VIP ({$vipDiscountPercent}% เฉพาะร้านค้า ไม่รวม 7/11):</span>
+                      <span class="font-bold">
+                        -{(cartItems.length > 0 ? cartVipDiscountAmount : previewVipDiscount).toLocaleString()} ฿
+                      </span>
+                    </div>
+                  {/if}
+                  {#if useCrmPointDiscount && canRedeemCrm}
+                    <div class="flex items-center justify-between text-xs text-cyan-300">
+                      <span>ส่วนลดแลกแต้ม CRM (100 แต้ม):</span>
+                      <span class="font-bold">
+                        -{(cartItems.length > 0 ? cartCrmDiscountAmount : previewCrmDiscount).toLocaleString()} ฿
+                      </span>
+                    </div>
+                  {/if}
                   <div class="flex items-center justify-between">
-                    <span class="text-xs text-slate-300">ยอดชำระรวมทั้งหมด (รวมมัดจำถ้าเช่า):</span>
+                    <span class="text-xs text-slate-300">ยอดชำระรวมสุทธิ:</span>
                     <span class="text-xl font-extrabold text-emerald-400">
-                      {(cartItems.length > 0
-                        ? cartGrandTotal
-                        : (calculatedUnitPrice + calculatedDeposit) * suitQuantity
-                      ).toLocaleString()} ฿
+                      {(cartItems.length > 0 ? cartGrandTotal : previewFinalTotal).toLocaleString()} ฿
                     </span>
                   </div>
                   <button
@@ -966,7 +1851,7 @@
                     {#if cartItems.length === 0 && remainingStockForSelection <= 0}
                       ❌ สินค้าหมด
                     {:else}
-                      📱 ชำระเงินผ่าน QR Code ({cartItems.length > 0 ? `${cartItems.length} รายการ` : `${suitQuantity} ชิ้น`})
+                      📱 ชำระเงินผ่าน QR Code & รับรหัสคิว
                     {/if}
                   </button>
                 </div>
@@ -997,6 +1882,16 @@
 
                   <div class="rounded-xl bg-slate-900/90 p-3 border border-slate-700 text-xs space-y-1">
                     <div class="text-slate-400">ผู้ทำรายการ: <strong class="text-white">{customerName}</strong></div>
+                    {#if cartVipDiscountAmount > 0}
+                      <div class="text-amber-300">
+                        ส่วนลด VIP ({$vipDiscountPercent}%): -{cartVipDiscountAmount.toLocaleString()} บาท
+                      </div>
+                    {/if}
+                    {#if cartCrmDiscountAmount > 0}
+                      <div class="text-cyan-300">
+                        ส่วนลดแต้ม CRM: -{cartCrmDiscountAmount.toLocaleString()} บาท
+                      </div>
+                    {/if}
                     <div class="text-base font-extrabold text-emerald-400">
                       ยอดชำระสุทธิ: {cartGrandTotal.toLocaleString()} บาท
                     </div>
@@ -1012,10 +1907,11 @@
                     </button>
                     <button
                       type="button"
-                      on:click={confirmSwimsuitQrPayment}
-                      class="rounded-xl bg-emerald-500 hover:bg-emerald-400 py-2.5 text-xs font-bold text-slate-950 shadow-lg cursor-pointer"
+                      disabled={isConfirmingPayment}
+                      on:click|stopPropagation={confirmSwimsuitQrPayment}
+                      class="rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 py-2.5 text-xs font-bold text-slate-950 shadow-lg cursor-pointer"
                     >
-                      ✅ ยืนยันชำระเงินสำเร็จ
+                      ✅ ยืนยันชำระเงิน & ออกบัตรคิว
                     </button>
                   </div>
                 </div>
@@ -1124,129 +2020,364 @@
           </div>
 
         {:else if $activeHotspot === 'checkin'}
-          <!-- ==================== ระบบจองรอบสระ & เช็คอิน (วันที่เรียงเป็น วัน/เดือน/ปี) ==================== -->
-          {#if !showBookingQr}
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div class="space-y-3">
-                <div class="flex flex-wrap items-center justify-between gap-2">
-                  <h3 class="font-bold text-white text-sm">กรอกข้อมูลจองรอบสระว่ายน้ำ</h3>
-                  <span
-                    class="rounded-full px-3 py-1 text-xs font-bold {remainingSelectedPool > 0
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'}"
-                  >
-                    🏊‍♂️ สระนี้รับได้อีก {remainingSelectedPool} คน
-                  </span>
-                </div>
+          <!-- ==================== แยกระบบจองรอบสระ / Check-in / Check-out & ยกเลิกหัก 20% ==================== -->
+          <div class="space-y-4">
+            <div class="grid grid-cols-3 gap-2 rounded-xl bg-slate-800/90 p-1.5 border border-slate-700">
+              <button
+                type="button"
+                on:click={() => {
+                  checkinTab = 'book';
+                  showBookingQr = false;
+                }}
+                class="rounded-lg py-2 text-xs font-bold transition cursor-pointer {checkinTab === 'book'
+                  ? 'bg-cyan-500 text-slate-950 shadow'
+                  : 'text-slate-300 hover:text-white'}"
+              >
+                1. จองรอบ & รับคิว
+              </button>
+              <button
+                type="button"
+                on:click={() => (checkinTab = 'checkinout')}
+                class="rounded-lg py-2 text-xs font-bold transition cursor-pointer {checkinTab === 'checkinout'
+                  ? 'bg-emerald-500 text-slate-950 shadow'
+                  : 'text-slate-300 hover:text-white'}"
+              >
+                2. Check-in / Check-out
+              </button>
+              <button
+                type="button"
+                on:click={() => (checkinTab = 'history')}
+                class="rounded-lg py-2 text-xs font-bold transition cursor-pointer {checkinTab === 'history'
+                  ? 'bg-amber-400 text-slate-950 shadow'
+                  : 'text-slate-300 hover:text-white'}"
+              >
+                3. รายการจอง & ยกเลิก (-20%)
+              </button>
+            </div>
 
-                <div class="grid grid-cols-2 gap-2 rounded-xl border border-slate-700/80 bg-slate-800/70 p-2.5 text-xs">
-                  <div class="flex items-center justify-between px-2">
-                    <span class="text-slate-400">สระหลัก ({$poolMetrics.currentSwimmers}/{$poolMetrics.maxCapacity}):</span>
-                    <strong class="text-cyan-300">รับได้อีก {remainingMainPool} คน</strong>
-                  </div>
-                  <div class="flex items-center justify-between px-2 border-l border-slate-700">
-                    <span class="text-slate-400">สระเด็ก ({$poolMetrics.kidsPoolSwimmers}/{KIDS_POOL_MAX_CAPACITY}):</span>
-                    <strong class="text-amber-300">รับได้อีก {remainingKidsPool} คน</strong>
-                  </div>
-                </div>
-
-                <div>
-                  <label for="bk-name" class="block text-xs text-slate-400 mb-1">ชื่อผู้จอง</label>
-                  <input id="bk-name" bind:value={bkName} class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white" />
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                  <div>
-                    <label for="bk-date" class="block text-xs text-slate-400 mb-1">วันที่ (วัน / เดือน / ปี)</label>
-                    <input id="bk-date" type="date" bind:value={bkDate} class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white" />
-                  </div>
-                  <div>
-                    <label for="bk-slot" class="block text-xs text-slate-400 mb-1">รอบเวลา</label>
-                    <select id="bk-slot" bind:value={bkSlot} class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white">
-                      <option>08:00 - 10:00</option>
-                      <option>10:00 - 12:00</option>
-                      <option>14:00 - 16:00</option>
-                      <option>16:00 - 18:00</option>
-                      <option>18:00 - 20:00</option>
-                    </select>
-                  </div>
-                </div>
-                <div class="grid grid-cols-2 gap-3">
-                  <div>
-                    <label for="bk-zone" class="block text-xs text-slate-400 mb-1">โซนสระ</label>
-                    <select id="bk-zone" bind:value={bkZone} class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white">
-                      <option value="main">สระหลัก (120฿/ท่าน)</option>
-                      <option value="kids">สระเด็ก (90฿/ท่าน)</option>
-                    </select>
-                  </div>
-                  <div>
-                    <div class="flex items-center justify-between mb-1">
-                      <label for="bk-count" class="text-xs text-slate-400">จำนวนผู้เข้าใช้ (ท่าน)</label>
-                      <span class="text-[11px] font-semibold text-emerald-400">
-                        รับได้อีก {remainingSelectedPool} คน
+            {#if checkinTab === 'book'}
+              {#if !showBookingQr}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div class="space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <h3 class="font-bold text-white text-sm">กรอกข้อมูลจองรอบสระว่ายน้ำ</h3>
+                      <span
+                        class="rounded-full px-3 py-1 text-xs font-bold {remainingSelectedPool > 0
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'}"
+                      >
+                        🏊‍♂️ สระนี้รับได้อีก {remainingSelectedPool} คน
                       </span>
                     </div>
-                    <input
-                      id="bk-count"
-                      type="number"
-                      min="1"
-                      max={Math.max(1, remainingSelectedPool)}
-                      bind:value={bkCount}
-                      class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
-                    />
+
+                    <div class="grid grid-cols-2 gap-2 rounded-xl border border-slate-700/80 bg-slate-800/70 p-2.5 text-xs">
+                      <div class="flex items-center justify-between px-2">
+                        <span class="text-slate-400">สระหลัก ({$poolMetrics.currentSwimmers}/{$poolMetrics.maxCapacity}):</span>
+                        <strong class="text-cyan-300">รับได้อีก {remainingMainPool} คน</strong>
+                      </div>
+                      <div class="flex items-center justify-between px-2 border-l border-slate-700">
+                        <span class="text-slate-400">สระเด็ก ({$poolMetrics.kidsPoolSwimmers}/{KIDS_POOL_MAX_CAPACITY}):</span>
+                        <strong class="text-amber-300">รับได้อีก {remainingKidsPool} คน</strong>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label for="bk-name" class="block text-xs text-slate-400 mb-1">ชื่อผู้จอง</label>
+                      <input id="bk-name" bind:value={bkName} class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white" />
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                      <div>
+                        <label for="bk-date" class="block text-xs text-slate-400 mb-1">วันที่ (วัน / เดือน / ปี)</label>
+                        <input id="bk-date" type="date" bind:value={bkDate} class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white" />
+                      </div>
+                      <div>
+                        <label for="bk-slot" class="block text-xs text-slate-400 mb-1">รอบเวลา</label>
+                        <select id="bk-slot" bind:value={bkSlot} class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white">
+                          <option>08:00 - 10:00</option>
+                          <option>10:00 - 12:00</option>
+                          <option>14:00 - 16:00</option>
+                          <option>16:00 - 18:00</option>
+                          <option>18:00 - 20:00</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3">
+                      <div>
+                        <label for="bk-zone" class="block text-xs text-slate-400 mb-1">โซนสระ</label>
+                        <select id="bk-zone" bind:value={bkZone} class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white">
+                          <option value="main">สระหลัก (120฿/ท่าน)</option>
+                          <option value="kids">สระเด็ก (90฿/ท่าน)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <div class="flex items-center justify-between mb-1">
+                          <label for="bk-count" class="text-xs text-slate-400">จำนวนผู้เข้าใช้ (ท่าน)</label>
+                          <span class="text-[11px] font-semibold text-emerald-400">
+                            รับได้อีก {remainingSelectedPool} คน
+                          </span>
+                        </div>
+                        <input
+                          id="bk-count"
+                          type="number"
+                          min="1"
+                          max={Math.max(1, remainingSelectedPool)}
+                          bind:value={bkCount}
+                          class="w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-white"
+                        />
+                      </div>
+                    </div>
+                    <div class="text-[11px] text-amber-300/90">
+                      * หมายเหตุ: หากยกเลิกการจองก่อนถึงเวลาจะหักค่าธรรมเนียม 20% ของเงินทั้งหมด
+                    </div>
+                    <button
+                      type="button"
+                      disabled={remainingSelectedPool <= 0}
+                      on:click={proceedToBookingQr}
+                      class="w-full rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-700 disabled:text-slate-400 text-slate-950 font-bold py-2.5 text-sm cursor-pointer"
+                    >
+                      {remainingSelectedPool > 0
+                        ? `ดำเนินการชำระเงินผ่าน QR Code (${(bkZone === 'kids' ? 90 : 120) * bkCount} ฿)`
+                        : 'สระรอบนี้เต็มแล้ว'}
+                    </button>
+                  </div>
+                  <div class="space-y-2">
+                    <h3 class="font-bold text-white text-sm">รายการจองล่าสุด & รหัสคิว</h3>
+                    {#each $bookings as b}
+                      <div class="rounded-lg border border-slate-800 bg-slate-800/50 p-3 flex items-center justify-between text-xs">
+                        <div>
+                          <div class="font-semibold text-white">
+                            <span class="text-cyan-300 font-bold">[{b.queueCode}]</span> {b.customerName} ({b.memberCount} ท่าน)
+                          </div>
+                          <div class="text-slate-400">{b.date} • {b.timeSlot}</div>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                          <span class="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 font-bold">{b.totalPrice}฿</span>
+                          <button
+                            type="button"
+                            on:click={() =>
+                              downloadQueueTicketJpg({
+                                queueCode: b.queueCode,
+                                serviceTitle: `จองรอบสระว่ายน้ำ (${b.poolZone === 'kids' ? 'สระเด็ก' : 'สระหลัก'})`,
+                                customerName: b.customerName,
+                                detailLine1: `วันที่ ${b.date} • รอบ ${b.timeSlot}`,
+                                detailLine2: `จำนวนผู้ใช้บริการ: ${b.memberCount} ท่าน`,
+                                amountText: `ชำระแล้ว: ${b.totalPrice.toLocaleString()} บาท`,
+                                timestamp: b.date
+                              })}
+                            class="px-2 py-1 rounded bg-slate-700 hover:bg-cyan-500 hover:text-slate-950 text-white font-bold cursor-pointer"
+                          >
+                            JPG
+                          </button>
+                        </div>
+                      </div>
+                    {/each}
                   </div>
                 </div>
-                <button
-                  type="button"
-                  disabled={remainingSelectedPool <= 0}
-                  on:click={proceedToBookingQr}
-                  class="w-full rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:bg-slate-700 disabled:text-slate-400 text-slate-950 font-bold py-2.5 text-sm cursor-pointer"
-                >
-                  {remainingSelectedPool > 0
-                    ? `ดำเนินการชำระเงินผ่าน QR Code (${(bkZone === 'kids' ? 90 : 120) * bkCount} ฿)`
-                    : 'สระรอบนี้เต็มแล้ว'}
-                </button>
-              </div>
-              <div class="space-y-2">
-                <h3 class="font-bold text-white text-sm">รายการจองล่าสุด</h3>
-                {#each $bookings as b}
-                  <div class="rounded-lg border border-slate-800 bg-slate-800/50 p-3 flex items-center justify-between text-xs">
-                    <div>
-                      <div class="font-semibold text-white">{b.customerName} ({b.memberCount} ท่าน)</div>
-                      <div class="text-slate-400">{b.date} • {b.timeSlot}</div>
-                    </div>
-                    <span class="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 font-bold">{b.totalPrice}฿</span>
+              {:else}
+                <div class="text-center space-y-4 max-w-sm mx-auto">
+                  <div class="text-sm font-bold text-cyan-300">สแกน QR Code ชำระค่าเข้าสระว่ายน้ำ</div>
+                  <div class="text-xs text-slate-300">
+                    โซน: <strong>{bkZone === 'kids' ? 'สระเด็ก' : 'สระหลัก'}</strong> ({bkCount} ท่าน) • ยอดชำระ{' '}
+                    <strong class="text-emerald-400">{(bkZone === 'kids' ? 90 : 120) * bkCount} บาท</strong>
                   </div>
-                {/each}
+                  <div class="mx-auto w-48 h-48 rounded-xl bg-white p-3 flex items-center justify-center border-4 border-cyan-400">
+                    {#if !qrImageLoadError}
+                      <img src={PAYMENT_QR_IMAGE_URL} alt="QR" class="w-full h-full object-contain" on:error={handleQrImgError} />
+                    {:else}
+                      <span class="text-xs text-slate-700 font-semibold">วางรูป QR ที่ public/my-qrcode.png</span>
+                    {/if}
+                  </div>
+                  <div class="flex gap-2">
+                    <button type="button" on:click={() => (showBookingQr = false)} class="flex-1 rounded-lg bg-slate-800 py-2 text-xs cursor-pointer">← แก้ไข</button>
+                    <button
+                      type="button"
+                      disabled={isConfirmingPayment}
+                      on:click|stopPropagation={confirmBookingPayment}
+                      class="flex-1 rounded-lg bg-emerald-500 disabled:opacity-50 text-slate-950 font-bold py-2 text-xs cursor-pointer"
+                    >
+                      ✅ ยืนยันชำระเงิน & ออกบัตรคิว
+                    </button>
+                  </div>
+                </div>
+              {/if}
+
+            {:else if checkinTab === 'checkinout'}
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="rounded-xl border border-emerald-500/30 bg-slate-800/50 p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-emerald-400">🟢 รอเช็คอินเข้าสระ (Check-In)</h3>
+                    <span class="text-xs text-slate-400">
+                      {$bookings.filter((b) => b.status === 'paid').length} รายการ
+                    </span>
+                  </div>
+                  {#if $bookings.filter((b) => b.status === 'paid').length === 0}
+                    <div class="rounded-lg border border-dashed border-slate-700 p-6 text-center text-xs text-slate-400">
+                      ไม่มีรายการรอเช็คอิน
+                    </div>
+                  {:else}
+                    <div class="space-y-2 max-h-72 overflow-y-auto">
+                      {#each $bookings.filter((b) => b.status === 'paid') as b}
+                        <div class="rounded-xl border border-slate-700 bg-slate-900/90 p-3 flex items-center justify-between gap-2 text-xs">
+                          <div>
+                            <div class="font-bold text-white">
+                              <span class="text-cyan-300">[{b.queueCode}]</span> {b.customerName}
+                            </div>
+                            <div class="text-slate-400 mt-0.5">
+                              {b.poolZone === 'kids' ? 'สระเด็ก' : 'สระหลัก'} • {b.memberCount} ท่าน • {b.timeSlot}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            on:click={() => handlePoolCheckIn(b)}
+                            class="shrink-0 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold px-3 py-2 text-xs cursor-pointer"
+                          >
+                            ✓ เช็คอินเข้าสระ
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+
+                <div class="rounded-xl border border-amber-500/30 bg-slate-800/50 p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-bold text-amber-400">🟠 กำลังว่ายน้ำ / รอเช็คเอาท์ (Check-Out)</h3>
+                    <span class="text-xs text-slate-400">
+                      {$bookings.filter((b) => b.status === 'checked-in').length} รายการ
+                    </span>
+                  </div>
+                  {#if $bookings.filter((b) => b.status === 'checked-in').length === 0}
+                    <div class="rounded-lg border border-dashed border-slate-700 p-6 text-center text-xs text-slate-400">
+                      ไม่มีผู้ใช้งานรอเช็คเอาท์ในขณะนี้
+                    </div>
+                  {:else}
+                    <div class="space-y-2 max-h-72 overflow-y-auto">
+                      {#each $bookings.filter((b) => b.status === 'checked-in') as b}
+                        <div class="rounded-xl border border-slate-700 bg-slate-900/90 p-3 flex items-center justify-between gap-2 text-xs">
+                          <div>
+                            <div class="font-bold text-white">
+                              <span class="text-amber-300">[{b.queueCode}]</span> {b.customerName}
+                            </div>
+                            <div class="text-slate-400 mt-0.5">
+                              เช็คอินเมื่อ: {b.checkedInAt || '-'} • {b.memberCount} ท่าน
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            on:click={() => handlePoolCheckOut(b)}
+                            class="shrink-0 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold px-3 py-2 text-xs cursor-pointer"
+                          >
+                            ↪ เช็คเอาท์ออก
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
               </div>
-            </div>
-          {:else}
-            <div class="text-center space-y-4 max-w-sm mx-auto">
-              <div class="text-sm font-bold text-cyan-300">สแกน QR Code ชำระค่าเข้าสระว่ายน้ำ</div>
-              <div class="text-xs text-slate-300">
-                โซน: <strong>{bkZone === 'kids' ? 'สระเด็ก' : 'สระหลัก'}</strong> ({bkCount} ท่าน) • ยอดชำระ{' '}
-                <strong class="text-emerald-400">{(bkZone === 'kids' ? 90 : 120) * bkCount} บาท</strong>
+
+            {:else}
+              <div class="space-y-3">
+                <div class="rounded-xl border border-rose-500/30 bg-rose-950/20 px-4 py-2.5 text-xs text-rose-200">
+                  ⚠️ นโยบายการยกเลิก: หากยกเลิกการจองก่อนถึงเวลาใช้บริการ ระบบจะ<strong>หักค่าธรรมเนียม 20% ของยอดเงินทั้งหมด</strong> และคืนเงินส่วนต่าง 80% ทันที
+                </div>
+                <div class="space-y-2 max-h-80 overflow-y-auto">
+                  {#each $bookings as b}
+                    <div class="rounded-xl border border-slate-700 bg-slate-800/60 p-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div>
+                        <div class="font-bold text-white flex items-center gap-2">
+                          <span class="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300">คิว {b.queueCode}</span>
+                          <span>{b.customerName} ({b.memberCount} ท่าน)</span>
+                          <span class="px-2 py-0.5 rounded text-[10px] font-bold {b.status === 'paid'
+                            ? 'bg-sky-500/20 text-sky-300'
+                            : b.status === 'checked-in'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : b.status === 'checked-out'
+                                ? 'bg-slate-700 text-slate-300'
+                                : 'bg-rose-500/20 text-rose-300'}">
+                            {b.status === 'paid'
+                              ? 'จองแล้ว (รอเช็คอิน)'
+                              : b.status === 'checked-in'
+                                ? `เช็คอินแล้ว (${b.checkedInAt})`
+                                : b.status === 'checked-out'
+                                  ? `เช็คเอาท์แล้ว (${b.checkedOutAt})`
+                                  : `ยกเลิกแล้ว (หัก ${b.penaltyAmount}฿ / คืน ${b.refundAmount}฿)`}
+                          </span>
+                        </div>
+                        <div class="text-slate-400 mt-1">
+                          รหัส {b.id} • วันที่ {b.date} • รอบ {b.timeSlot} • ยอดชำระ {b.totalPrice.toLocaleString()} บาท
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <button
+                          type="button"
+                          on:click={() =>
+                            downloadQueueTicketJpg({
+                              queueCode: b.queueCode,
+                              serviceTitle: `จองรอบสระว่ายน้ำ (${b.poolZone === 'kids' ? 'สระเด็ก' : 'สระหลัก'})`,
+                              customerName: b.customerName,
+                              detailLine1: `วันที่ ${b.date} • รอบ ${b.timeSlot}`,
+                              detailLine2: `จำนวนผู้ใช้บริการ: ${b.memberCount} ท่าน`,
+                              amountText: `ชำระแล้ว: ${b.totalPrice.toLocaleString()} บาท`,
+                              timestamp: b.date
+                            })}
+                          class="rounded-lg bg-slate-700 hover:bg-cyan-500 hover:text-slate-950 px-3 py-1.5 font-bold text-white cursor-pointer"
+                        >
+                          📥 โหลดคิว JPG
+                        </button>
+                        {#if b.status === 'paid'}
+                          <button
+                            type="button"
+                            on:click={() => cancelPoolBooking(b)}
+                            class="rounded-lg bg-rose-600/80 hover:bg-rose-500 px-3 py-1.5 font-bold text-white cursor-pointer"
+                          >
+                            ยกเลิกการจอง (หัก 20%)
+                          </button>
+                        {/if}
+                      </div>
+                    </div>
+                  {/each}
+                </div>
               </div>
-              <div class="mx-auto w-48 h-48 rounded-xl bg-white p-3 flex items-center justify-center border-4 border-cyan-400">
-                {#if !qrImageLoadError}
-                  <img src={PAYMENT_QR_IMAGE_URL} alt="QR" class="w-full h-full object-contain" on:error={handleQrImgError} />
-                {:else}
-                  <span class="text-xs text-slate-700 font-semibold">วางรูป QR ที่ public/my-qrcode.png</span>
-                {/if}
-              </div>
-              <div class="flex gap-2">
-                <button type="button" on:click={() => (showBookingQr = false)} class="flex-1 rounded-lg bg-slate-800 py-2 text-xs cursor-pointer">← แก้ไข</button>
-                <button type="button" on:click={confirmBookingPayment} class="flex-1 rounded-lg bg-emerald-500 text-slate-950 font-bold py-2 text-xs cursor-pointer">✅ ยืนยันชำระเงิน</button>
-              </div>
-            </div>
-          {/if}
+            {/if}
+          </div>
 
         {:else if $activeHotspot === 'locker'}
-          <!-- ==================== ตู้ล็อกเกอร์อัจฉริยะ ==================== -->
+          <!-- ==================== ตู้ล็อกเกอร์อัจฉริยะ 30 ตู้ (จำกัดเวลาจอง 4 ชั่วโมง) ==================== -->
           {#if !selectedLockerForQr}
             <div class="space-y-4">
+              {#if lastReservedLockerBanner}
+                <div class="rounded-2xl border border-emerald-400/60 bg-emerald-950/45 p-4 flex flex-wrap items-center justify-between gap-3">
+                  <div class="flex items-center gap-3">
+                    <div class="h-10 w-10 rounded-xl bg-emerald-500 text-slate-950 font-black grid place-items-center text-sm shrink-0">
+                      ✓
+                    </div>
+                    <div>
+                      <div class="text-sm font-extrabold text-emerald-300">
+                        จองล็อกเกอร์สำเร็จ! ตู้ {lastReservedLockerBanner.number} ถูกล็อกไว้ให้คุณ {LOCKER_DURATION_HOURS} ชั่วโมง
+                      </div>
+                      <div class="text-xs text-slate-200 mt-0.5">
+                        รหัสคิว <strong class="text-cyan-300">{lastReservedLockerBanner.queueCode}</strong> • {lastReservedLockerBanner.zone} • ใช้งานได้ถึงเวลา <strong class="text-amber-300">{lastReservedLockerBanner.reservedUntil}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    on:click={() => (lastReservedLockerBanner = null)}
+                    class="rounded-lg bg-slate-800 hover:bg-slate-700 px-3 py-1.5 text-xs text-slate-300 cursor-pointer"
+                  >
+                    รับทราบ
+                  </button>
+                </div>
+              {/if}
+
               <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-700 bg-slate-800/60 px-4 py-2.5 text-xs">
                 <span class="text-slate-300">
-                  เลือกตู้ล็อกเกอร์ที่ว่างด้านล่าง เพื่อสแกน <strong>QR Code ชำระเงิน</strong> ก่อนยืนยันการจอง
+                  {#if isUserVip}
+                    👑 สิทธิพิเศษ <strong class="text-amber-300">{$activeVipMembership?.tierName}</strong>: จองล็อกเกอร์ได้ <strong class="text-emerald-400">ฟรี (0 บาท) ทุกโซน</strong> • ระยะเวลาใช้งาน <strong class="text-cyan-300">{LOCKER_DURATION_HOURS} ชั่วโมง / ครั้ง</strong>
+                  {:else}
+                    ผังตู้ล็อกเกอร์ 30 ตู้ (ระยะเวลาจอง <strong class="text-cyan-300">{LOCKER_DURATION_HOURS} ชม./ครั้ง</strong> • โซน A/B 40฿ • โซน C VIP 80฿)
+                  {/if}
                 </span>
                 <div class="flex items-center gap-3">
                   <span class="text-emerald-400 font-semibold">● ว่าง ({$lockers.filter((l) => l.status === 'available').length})</span>
@@ -1254,29 +2385,92 @@
                 </div>
               </div>
 
-              <div class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5">
-                {#each $lockers as lk}
-                  <button
-                    type="button"
-                    disabled={lk.status !== 'available'}
-                    on:click={() => openLockerQrPayment(lk)}
-                    class="rounded-xl p-3 border text-center transition cursor-pointer {lk.status === 'available'
-                      ? 'border-slate-700 bg-slate-800/70 hover:border-cyan-400 hover:bg-cyan-950/30 text-white'
-                      : 'border-rose-500/30 bg-rose-950/30 text-slate-400 cursor-not-allowed'}"
-                  >
-                    <div class="text-xs font-bold">{lk.number}</div>
-                    <div class="text-[10px] text-slate-400">{lk.zone}</div>
-                    <div class="mt-1 text-[11px] font-semibold {lk.status === 'available' ? 'text-emerald-400' : 'text-rose-400'}">
-                      {lk.status === 'available' ? `ว่าง (${lk.price}฿)` : lk.status === 'reserved' ? 'จองแล้ว' : 'ไม่ว่าง'}
-                    </div>
-                  </button>
+              <div class="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  on:click={() => (lockerZoneFilter = 'all')}
+                  class="px-3 py-1 rounded-full text-xs font-bold cursor-pointer {lockerZoneFilter === 'all'
+                    ? 'bg-cyan-500 text-slate-950'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}"
+                >
+                  ทั้งหมด (30 ตู้)
+                </button>
+                <button
+                  type="button"
+                  on:click={() => (lockerZoneFilter = 'A')}
+                  class="px-3 py-1 rounded-full text-xs font-bold cursor-pointer {lockerZoneFilter === 'A'
+                    ? 'bg-sky-500 text-slate-950'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}"
+                >
+                  โซน A • ชาย (A-01 – A-10)
+                </button>
+                <button
+                  type="button"
+                  on:click={() => (lockerZoneFilter = 'B')}
+                  class="px-3 py-1 rounded-full text-xs font-bold cursor-pointer {lockerZoneFilter === 'B'
+                    ? 'bg-pink-500 text-white'
+                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}"
+                >
+                  โซน B • หญิง (B-11 – B-20)
+                </button>
+                <button
+                  type="button"
+                  on:click={() => (lockerZoneFilter = 'C')}
+                  class="px-3 py-1 rounded-full text-xs font-bold cursor-pointer {lockerZoneFilter === 'C'
+                    ? 'bg-amber-400 text-slate-950'
+                    : 'bg-slate-800 text-amber-300 hover:bg-slate-700'}"
+                >
+                  👑 โซน C • VIP (C-21 – C-30)
+                </button>
+              </div>
+
+              <div class="grid grid-cols-2 sm:grid-cols-5 md:grid-cols-6 gap-2.5">
+                {#each filteredLockers as lk}
+                  <div class="flex flex-col gap-1">
+                    <button
+                      type="button"
+                      disabled={lk.status !== 'available'}
+                      on:click={() => openLockerQrPayment(lk)}
+                      class="w-full rounded-xl p-2.5 border text-center transition cursor-pointer {lk.status === 'available'
+                        ? lk.tierType === 'vip'
+                          ? 'border-amber-500/40 bg-amber-950/20 hover:border-amber-400 text-white'
+                          : 'border-slate-700 bg-slate-800/70 hover:border-cyan-400 hover:bg-cyan-950/30 text-white'
+                        : 'border-rose-500/30 bg-rose-950/30 text-slate-400 cursor-not-allowed'}"
+                    >
+                      <div class="text-xs font-extrabold {lk.tierType === 'vip' ? 'text-amber-300' : 'text-white'}">
+                        {lk.number}
+                      </div>
+                      <div class="text-[10px] text-slate-400">{lk.zone}</div>
+                      <div class="mt-1 text-[11px] font-semibold {lk.status === 'available' ? 'text-emerald-400' : 'text-rose-400'}">
+                        {#if lk.status === 'available'}
+                          {isUserVip ? `ว่าง (${LOCKER_DURATION_HOURS} ชม. ฟรี)` : `ว่าง (${lk.price}฿ / ${LOCKER_DURATION_HOURS} ชม.)`}
+                        {:else if lk.status === 'reserved'}
+                          จองแล้ว ({LOCKER_DURATION_HOURS} ชม.)
+                        {:else}
+                          ไม่ว่าง
+                        {/if}
+                      </div>
+                      {#if lk.status === 'reserved' && lk.reservedUntil}
+                        <div class="text-[9px] text-amber-300 mt-0.5">ถึง {lk.reservedUntil}</div>
+                      {/if}
+                    </button>
+                    {#if lk.status === 'reserved'}
+                      <button
+                        type="button"
+                        on:click={() => cancelLockerReservation(lk)}
+                        class="w-full rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[10px] font-bold py-1 cursor-pointer"
+                      >
+                        ยกเลิกตู้ ({lk.isVipFree ? 'ฟรี' : 'หัก 20%'})
+                      </button>
+                    {/if}
+                  </div>
                 {/each}
               </div>
             </div>
           {:else}
             <div class="max-w-md mx-auto space-y-4 text-center py-2">
               <div class="inline-block rounded-full bg-cyan-500/20 px-3.5 py-1 text-xs font-bold text-cyan-300">
-                🔐 ชำระเงินผ่าน QR Code เพื่อยืนยันจองตู้ล็อกเกอร์
+                {isUserVip ? `👑 ยืนยันสิทธิ์สมาชิก VIP จองล็อกเกอร์ฟรี (${LOCKER_DURATION_HOURS} ชม.)` : `🔐 ชำระเงินผ่าน QR Code เพื่อยืนยันจองตู้ล็อกเกอร์ (${LOCKER_DURATION_HOURS} ชม.)`}
               </div>
 
               <div class="rounded-xl border border-slate-700 bg-slate-800/70 p-3.5 text-left space-y-2">
@@ -1285,8 +2479,16 @@
                   <strong class="text-cyan-300 text-sm">{selectedLockerForQr.number} ({selectedLockerForQr.zone})</strong>
                 </div>
                 <div class="flex items-center justify-between text-xs">
+                  <span class="text-slate-400">ระยะเวลาใช้งานสูงสุด:</span>
+                  <strong class="text-amber-300 text-xs">{LOCKER_DURATION_HOURS} ชั่วโมง (ล็อกอัตโนมัติหลังชำระเงิน)</strong>
+                </div>
+                <div class="flex items-center justify-between text-xs">
                   <span class="text-slate-400">ค่าบริการเช่าตู้ล็อกเกอร์:</span>
-                  <strong class="text-emerald-400 text-base">{selectedLockerForQr.price} บาท</strong>
+                  {#if isUserVip}
+                    <strong class="text-amber-300 text-base">ฟรี 0 บาท (สิทธิ์สมาชิก VIP)</strong>
+                  {:else}
+                    <strong class="text-emerald-400 text-base">{selectedLockerForQr.price} บาท</strong>
+                  {/if}
                 </div>
                 <div class="pt-1">
                   <label for="locker-cust-name" class="block text-[11px] text-slate-400 mb-1">ชื่อผู้จองล็อกเกอร์</label>
@@ -1299,24 +2501,26 @@
                 </div>
               </div>
 
-              <div class="mx-auto w-52 h-52 rounded-2xl bg-white p-3 shadow-xl flex flex-col items-center justify-center border-4 border-cyan-400">
-                {#if !qrImageLoadError}
-                  <img
-                    src={PAYMENT_QR_IMAGE_URL}
-                    alt="Locker Payment QR Code"
-                    class="w-full h-full object-contain rounded-lg"
-                    on:error={handleQrImgError}
-                  />
-                {:else}
-                  <div class="text-slate-800 text-center p-2 space-y-1">
-                    <div class="text-3xl">📷</div>
-                    <div class="text-xs font-bold text-slate-900">พื้นที่สำหรับ QR Code ของคุณ</div>
-                    <p class="text-[10px] text-slate-600">
-                      วางรูปที่ <code class="bg-slate-200 px-1 rounded">public/my-qrcode.png</code>
-                    </p>
-                  </div>
-                {/if}
-              </div>
+              {#if !isUserVip}
+                <div class="mx-auto w-52 h-52 rounded-2xl bg-white p-3 shadow-xl flex flex-col items-center justify-center border-4 border-cyan-400">
+                  {#if !qrImageLoadError}
+                    <img
+                      src={PAYMENT_QR_IMAGE_URL}
+                      alt="Locker Payment QR Code"
+                      class="w-full h-full object-contain rounded-lg"
+                      on:error={handleQrImgError}
+                    />
+                  {:else}
+                    <div class="text-slate-800 text-center p-2 space-y-1">
+                      <div class="text-3xl">📷</div>
+                      <div class="text-xs font-bold text-slate-900">พื้นที่สำหรับ QR Code ของคุณ</div>
+                      <p class="text-[10px] text-slate-600">
+                        วางรูปที่ <code class="bg-slate-200 px-1 rounded">public/my-qrcode.png</code>
+                      </p>
+                    </div>
+                  {/if}
+                </div>
+              {/if}
 
               <div class="grid grid-cols-2 gap-2.5 pt-1">
                 <button
@@ -1328,10 +2532,11 @@
                 </button>
                 <button
                   type="button"
-                  on:click={confirmLockerQrPayment}
-                  class="rounded-xl bg-emerald-500 hover:bg-emerald-400 py-2.5 text-xs font-extrabold text-slate-950 shadow-lg cursor-pointer"
+                  disabled={isConfirmingPayment}
+                  on:click|stopPropagation={confirmLockerQrPayment}
+                  class="rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 py-2.5 text-xs font-extrabold text-slate-950 shadow-lg cursor-pointer"
                 >
-                  ✅ ยืนยันชำระเงิน & จองตู้
+                  {isUserVip ? `✅ ยืนยันจองฟรี (${LOCKER_DURATION_HOURS} ชม.)` : `✅ ยืนยันชำระเงิน (${LOCKER_DURATION_HOURS} ชม.)`}
                 </button>
               </div>
             </div>
@@ -1406,11 +2611,47 @@
                 </button>
               </div>
               <div class="space-y-2">
-                <h4 class="text-xs font-bold text-slate-300">รายชื่อผู้สมัครคอร์สล่าสุด</h4>
+                <h4 class="text-xs font-bold text-slate-300">รายชื่อผู้สมัครคอร์สล่าสุด (ยกเลิกก่อนเรียนหัก 20%)</h4>
                 {#each $courseRegistrations as c}
-                  <div class="rounded-lg border border-slate-800 bg-slate-800/50 p-3 text-xs">
-                    <div class="font-bold text-white">{c.studentName} ({c.memberCount} ท่าน) • {c.courseName}</div>
-                    <div class="text-slate-400">{c.instructor} ({c.schedule})</div>
+                  <div class="rounded-lg border border-slate-800 bg-slate-800/50 p-3 text-xs flex items-center justify-between gap-2">
+                    <div>
+                      <div class="font-bold text-white">
+                        <span class="text-cyan-300">[{c.queueCode}]</span> {c.studentName} ({c.memberCount} ท่าน) • {c.courseName}
+                      </div>
+                      <div class="text-slate-400">
+                        {c.instructor} ({c.schedule})
+                        {#if c.status === 'cancelled'}
+                          <span class="text-rose-400 font-bold ml-1">• ยกเลิกแล้ว (หัก {c.penaltyAmount}฿ / คืน {c.refundAmount}฿)</span>
+                        {/if}
+                      </div>
+                    </div>
+                    {#if c.status !== 'cancelled'}
+                      <div class="flex flex-col gap-1 shrink-0">
+                        <button
+                          type="button"
+                          on:click={() =>
+                            downloadQueueTicketJpg({
+                              queueCode: c.queueCode,
+                              serviceTitle: `สมัครคอร์สเรียน: ${c.courseName}`,
+                              customerName: c.studentName,
+                              detailLine1: `ผู้สอน: ${c.instructor} (${c.memberCount} ท่าน)`,
+                              detailLine2: `ตารางเรียน: ${c.schedule}`,
+                              amountText: `ชำระแล้ว: ${c.totalPrice.toLocaleString()} บาท`,
+                              timestamp: new Date().toLocaleDateString('th-TH')
+                            })}
+                          class="px-2 py-1 rounded bg-cyan-500/20 text-cyan-300 font-bold cursor-pointer"
+                        >
+                          คิว JPG
+                        </button>
+                        <button
+                          type="button"
+                          on:click={() => cancelCourseRegistration(c)}
+                          class="px-2 py-1 rounded bg-rose-500/20 text-rose-300 font-bold cursor-pointer"
+                        >
+                          ยกเลิก (-20%)
+                        </button>
+                      </div>
+                    {/if}
                   </div>
                 {/each}
               </div>
@@ -1431,37 +2672,74 @@
               </div>
               <div class="flex gap-2">
                 <button type="button" on:click={() => (showCourseQr = false)} class="flex-1 rounded-lg bg-slate-800 py-2 text-xs cursor-pointer">← แก้ไข</button>
-                <button type="button" on:click={confirmCoursePayment} class="flex-1 rounded-lg bg-emerald-500 text-slate-950 font-bold py-2 text-xs cursor-pointer">✅ ยืนยันชำระเงิน</button>
+                <button
+                  type="button"
+                  disabled={isConfirmingPayment}
+                  on:click|stopPropagation={confirmCoursePayment}
+                  class="flex-1 rounded-lg bg-emerald-500 disabled:opacity-50 text-slate-950 font-bold py-2 text-xs cursor-pointer"
+                >
+                  ✅ ยืนยันชำระเงิน & ออกบัตรคิว
+                </button>
               </div>
             </div>
           {/if}
 
-        {:else}
-          <!-- ==================== เซ็นเซอร์คุณภาพน้ำ IoT ==================== -->
-          <div class="space-y-4">
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <div class="rounded-xl bg-slate-800/70 p-4 border border-cyan-500/30">
-                <div class="text-xs text-slate-400">ค่า pH ของน้ำ</div>
-                <div class="text-2xl font-extrabold text-cyan-400">{$poolMetrics.ph}</div>
-                <div class="text-[11px] text-emerald-400 mt-1">● ปกติ (7.2 - 7.6)</div>
+        {:else if $activeHotspot === 'water'}
+          <!-- ==================== เซ็นเซอร์คุณภาพน้ำ IoT ครบ 6 ค่า + Telemetry Ping (Admin Only) ==================== -->
+          {#if $currentUser?.role === 'admin'}
+            <div class="space-y-4">
+              <div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-950/25 px-4 py-2.5 text-xs">
+                <span class="text-emerald-300 font-bold">● ระบบเซ็นเซอร์ IoT ทำงานปกติครบทุกจุด (6 Sensors Online)</span>
+                <span class="text-cyan-300 font-semibold">
+                  Telemetry Ping: <strong>{$poolMetrics.telemetryPingMs} ms</strong> • ผู้ว่ายน้ำปัจจุบัน: <strong>{$poolMetrics.currentSwimmers}/{$poolMetrics.maxCapacity} คน</strong>
+                </span>
               </div>
-              <div class="rounded-xl bg-slate-800/70 p-4 border border-emerald-500/30">
-                <div class="text-xs text-slate-400">คลอรีนอิสระ</div>
-                <div class="text-2xl font-extrabold text-emerald-400">{$poolMetrics.chlorine} ppm</div>
-                <div class="text-[11px] text-emerald-400 mt-1">● ฆ่าเชื้อเหมาะสม</div>
-              </div>
-              <div class="rounded-xl bg-slate-800/70 p-4 border border-amber-500/30">
-                <div class="text-xs text-slate-400">อุณหภูมิน้ำ</div>
-                <div class="text-2xl font-extrabold text-amber-400">{$poolMetrics.temperature} °C</div>
-                <div class="text-[11px] text-slate-300 mt-1">เย็นสบายมาตรฐาน</div>
-              </div>
-              <div class="rounded-xl bg-slate-800/70 p-4 border border-slate-700">
-                <div class="text-xs text-slate-400">ผู้ว่ายน้ำปัจจุบัน</div>
-                <div class="text-2xl font-extrabold text-white">{$poolMetrics.currentSwimmers}/{$poolMetrics.maxCapacity}</div>
-                <div class="text-[11px] text-cyan-300 mt-1">ความขุ่น {$poolMetrics.turbidity} NTU</div>
+
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div class="rounded-xl bg-slate-800/70 p-4 border border-cyan-500/30">
+                  <div class="text-xs text-slate-400">ค่า pH ของน้ำ</div>
+                  <div class="text-2xl font-extrabold text-cyan-400 mt-1">{$poolMetrics.ph}</div>
+                  <div class="text-[11px] text-emerald-400 mt-1">● ปกติ (มาตรฐาน 7.2 - 7.6)</div>
+                </div>
+
+                <div class="rounded-xl bg-slate-800/70 p-4 border border-emerald-500/30">
+                  <div class="text-xs text-slate-400">คลอรีนอิสระ (Chlorine)</div>
+                  <div class="text-2xl font-extrabold text-emerald-400 mt-1">{$poolMetrics.chlorine} ppm</div>
+                  <div class="text-[11px] text-emerald-400 mt-1">● ฆ่าเชื้อเหมาะสม (1.0 - 3.0)</div>
+                </div>
+
+                <div class="rounded-xl bg-slate-800/70 p-4 border border-amber-500/30">
+                  <div class="text-xs text-slate-400">อุณหภูมิน้ำ (Temperature)</div>
+                  <div class="text-2xl font-extrabold text-amber-400 mt-1">{$poolMetrics.temperature} °C</div>
+                  <div class="text-[11px] text-slate-300 mt-1">● เย็นสบายมาตรฐาน (26 - 29°C)</div>
+                </div>
+
+                <div class="rounded-xl bg-slate-800/70 p-4 border border-sky-500/30">
+                  <div class="text-xs text-slate-400">ค่า ORP (ฆ่าเชื้อออกซิเดชัน)</div>
+                  <div class="text-2xl font-extrabold text-sky-400 mt-1">{$poolMetrics.orp} mV</div>
+                  <div class="text-[11px] text-emerald-400 mt-1">● ประสิทธิภาพสูง (&gt; 650 mV)</div>
+                </div>
+
+                <div class="rounded-xl bg-slate-800/70 p-4 border border-indigo-500/30">
+                  <div class="text-xs text-slate-400">ความขุ่นของน้ำ (Turbidity)</div>
+                  <div class="text-2xl font-extrabold text-indigo-300 mt-1">{$poolMetrics.turbidity} NTU</div>
+                  <div class="text-[11px] text-emerald-400 mt-1">● น้ำใสสะอาด (&lt; 0.5 NTU)</div>
+                </div>
+
+                <div class="rounded-xl bg-slate-800/70 p-4 border border-teal-500/30">
+                  <div class="text-xs text-slate-400">ค่าสารละลายรวม (TDS)</div>
+                  <div class="text-2xl font-extrabold text-teal-300 mt-1">{$poolMetrics.tds} ppm</div>
+                  <div class="text-[11px] text-emerald-400 mt-1">● อยู่ในเกณฑ์ปลอดภัย (&lt; 1,000)</div>
+                </div>
               </div>
             </div>
-          </div>
+          {:else}
+            <div class="rounded-xl border border-rose-500/40 bg-rose-950/30 p-6 text-center space-y-2">
+              <div class="text-2xl">🔒</div>
+              <div class="text-sm font-bold text-rose-300">จำกัดสิทธิ์เฉพาะผู้ดูแลระบบ (Admin Only)</div>
+              <p class="text-xs text-slate-300">กรุณาเข้าสู่ระบบด้วยบัญชี Admin เพื่อดูข้อมูลเซ็นเซอร์คุณภาพน้ำและระบบ IoT</p>
+            </div>
+          {/if}
         {/if}
       </div>
     </div>

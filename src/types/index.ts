@@ -1,13 +1,4 @@
-﻿export type UserRole = 'admin' | 'member' | 'guest' | 'user';
-
-export interface UserProfile {
-  username: string;
-  displayName?: string;
-  name?: string;
-  role: UserRole;
-}
-
-export type HotspotId =
+﻿export type HotspotId =
   | 'checkin'
   | 'locker'
   | 'courses'
@@ -16,31 +7,57 @@ export type HotspotId =
   | 'water'
   | 'lifeguard'
   | 'kids-pool'
+  | 'vip'
   | 'seven-eleven';
 
-export interface HotspotData {
-  id: HotspotId;
+export type SwimsuitSize = 'KIDS' | 'XS' | 'S' | 'M' | 'L' | 'XL' | '2XL';
+export type SwimsuitOrderType = 'rent' | 'buy';
+export type AnalyticsPeriod = 'daily' | 'weekly' | 'monthly';
+
+export type VipTier = 'none' | 'single' | 'couple' | 'family';
+export type VipBillingCycle = 'monthly' | 'yearly';
+
+export type CrmRank = 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
+
+export interface CrmPointTransaction {
+  id: string;
   title: string;
-  subtitle: string;
-  icon: string;
-  position: { x: number; y: number; z: number };
-  badge?: string;
+  points: number;
+  type: 'earn' | 'redeem';
+  timestamp: string;
 }
 
-export type SwimsuitSize = 'KIDS' | 'XS' | 'S' | 'M' | 'L' | 'XL' | 'XXL' | '2XL';
-export type SwimsuitOrderType = 'rent' | 'buy';
-export type SwimsuitCategory =
-  | 'men'
-  | 'women'
-  | 'kids'
-  | 'unisex'
-  | 'gear'
-  | 'one-piece'
-  | 'bikini'
-  | 'racing'
-  | 'trunks'
-  | 'rashguard'
-  | 'accessories';
+export interface CrmProfile {
+  points: number;
+  lifetimePoints: number;
+  visitCount: number;
+  transactions: CrmPointTransaction[];
+}
+
+export interface VipMembership {
+  id: string;
+  tier: VipTier;
+  tierName: string;
+  billingCycle: VipBillingCycle;
+  price: number;
+  discountPercent: number;
+  maxMembers: number;
+  ownerName: string;
+  phone: string;
+  familyMembers: string[];
+  expiresAt: string;
+  queueCode: string;
+  status: 'active' | 'cancelled';
+  refundAmount?: number;
+  penaltyAmount?: number;
+}
+
+export interface UserSession {
+  username: string;
+  name: string;
+  displayName: string;
+  role: 'admin' | 'user';
+}
 
 export interface SwimsuitColorOption {
   colorId: string;
@@ -52,74 +69,56 @@ export interface SwimsuitColorOption {
 export interface SwimsuitCatalogItem {
   id: string;
   name: string;
-  nameTH?: string;
-  category: SwimsuitCategory;
-  rentPrice: number;
-  rentalPrice?: number;
-  buyPrice: number;
-  price?: number;
-  depositPrice: number;
-  deposit?: number;
-  colorHex: string;
-  color?: string;
-  colorNumber: number;
-  availableColors: SwimsuitColorOption[];
+  category: 'men' | 'women' | 'kids' | 'unisex' | 'gear' | 'towel';
   icon: string;
   description: string;
-  available?: boolean;
+  rentPrice: number;
+  buyPrice: number;
+  depositPrice: number;
+  colorHex: string;
+  colorNumber: number;
+  availableColors?: SwimsuitColorOption[];
   rentStock: Record<SwimsuitSize, number>;
   buyStock: Record<SwimsuitSize, number>;
-  stock?: Record<SwimsuitSize, number>;
 }
-
-export type SwimsuitItem = SwimsuitCatalogItem;
 
 export interface SwimsuitCartItem {
   cartItemId: string;
   itemId: string;
-  swimsuitId?: string;
+  swimsuitId: string;
   name: string;
-  nameTH?: string;
   orderType: SwimsuitOrderType;
   size: SwimsuitSize;
   colorName: string;
   quantity: number;
-  rentalDays?: number;
+  rentalDays: number;
   unitPrice: number;
   depositPerUnit: number;
   totalPrice: number;
   colorHex: string;
   colorNumber: number;
-  color?: string;
+  color: string;
 }
-
-export type SwimsuitOrderStatus =
-  | 'pending'
-  | 'pending_payment'
-  | 'paid'
-  | 'rented'
-  | 'returned'
-  | 'cancelled';
 
 export interface SwimsuitOrder {
   id: string;
+  queueCode: string;
   customerName: string;
   phone: string;
   items: SwimsuitCartItem[];
-  subtotal?: number;
-  totalDeposit?: number;
+  subtotalBeforeDiscount: number;
+  vipDiscountAmount: number;
+  crmDiscountAmount?: number;
   totalAmount: number;
-  status: SwimsuitOrderStatus;
+  status: 'paid' | 'cancelled';
+  refundAmount?: number;
+  penaltyAmount?: number;
   createdAt: string;
-  swimsuitId?: string;
-  size?: SwimsuitSize;
-  quantity?: number;
 }
 
-export type SwimsuitRental = SwimsuitOrder;
-
-export interface BookingItem {
+export interface PoolBooking {
   id: string;
+  queueCode: string;
   customerName: string;
   phone: string;
   date: string;
@@ -127,12 +126,32 @@ export interface BookingItem {
   poolZone: 'main' | 'kids' | 'olympic';
   memberCount: number;
   totalPrice: number;
-  status: 'pending' | 'paid' | 'checked_in' | 'cancelled';
+  status: 'paid' | 'checked-in' | 'checked-out' | 'cancelled';
+  checkedInAt?: string;
+  checkedOutAt?: string;
+  refundAmount?: number;
+  penaltyAmount?: number;
   qrRef: string;
+}
+
+export interface LockerItem {
+  id: string;
+  number: string;
+  zone: string;
+  tierType: 'standard' | 'vip';
+  price: number;
+  status: 'available' | 'reserved' | 'occupied';
+  reservedBy?: string;
+  queueCode?: string;
+  paidAmount?: number;
+  isVipFree?: boolean;
+  durationHours?: number;
+  reservedUntil?: string;
 }
 
 export interface CourseRegistration {
   id: string;
+  queueCode: string;
   studentName: string;
   phone: string;
   courseName: string;
@@ -140,35 +159,7 @@ export interface CourseRegistration {
   schedule: string;
   memberCount: number;
   totalPrice: number;
-  status: 'pending' | 'paid' | 'cancelled';
+  status: 'paid' | 'cancelled';
+  refundAmount?: number;
+  penaltyAmount?: number;
 }
-
-export interface LockerItem {
-  id: string;
-  number: string;
-  zone: 'A (ชาย)' | 'B (หญิง)' | 'C (VIP)';
-  status: 'available' | 'occupied' | 'reserved';
-  reservedBy?: string;
-  price: number;
-}
-
-export interface PoolMetrics {
-  ph: number;
-  chlorine: number;
-  temperature: number;
-  turbidity: number;
-  currentSwimmers: number;
-  maxCapacity: number;
-  kidsPoolSwimmers: number;
-  activeLifeguards: number;
-}
-
-export interface ToastMessage {
-  id: string;
-  type: 'success' | 'info' | 'warning' | 'error' | 'danger' | 'warn';
-  title: string;
-  message: string;
-  msg: string;
-}
-
-export type AnalyticsPeriod = 'daily' | 'weekly' | 'monthly';
