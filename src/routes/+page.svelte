@@ -1,198 +1,171 @@
 <script lang="ts">
-  import { currentUser, isLoginModalOpen, addToast } from '../stores';
-  import { Waves, User, Lock, ArrowRight, ShieldCheck, UserCheck, X } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  import Navbar from '../lib/components/Navbar.svelte';
+  import Scene3D from '../lib/components/Scene3D.svelte';
+  import HotspotModal from '../lib/components/HotspotModal.svelte';
+  import ManagerDrawer from '../lib/components/ManagerDrawer.svelte';
+  import LoginPage from '../lib/components/LoginPage.svelte';
+  import ToastContainer from '../lib/components/ToastContainer.svelte';
+  import {
+    currentUser,
+    isLoginModalOpen,
+    activeHotspot,
+    isManagerDrawerOpen,
+    isExplorationMode,
+    addToast
+  } from '../lib/stores';
+  import type { HotspotId } from '../types';
 
-  let username = '';
-  let password = '';
-  let errorMsg = '';
+  let mounted = false;
 
-  function closeModal() {
-    errorMsg = '';
-    isLoginModalOpen.set(false);
-  }
+  // ซิงค์สถานะหน้าต่างและโหมดต่างๆ ลงบน URL อัตโนมัติ (Two-way URL Parameter Sync)
+  $: if (mounted && typeof window !== 'undefined') {
+    const url = new URL(window.location.href);
 
-  function handleLogin() {
-    errorMsg = '';
-    const u = username.trim().toLowerCase();
-    const p = password.trim();
-
-    if (!u || !p) {
-      errorMsg = 'กรุณากรอกชื่อผู้ใช้และรหัสผ่านให้ครบถ้วน';
-      return;
+    if ($activeHotspot && $activeHotspot !== 'seven-eleven') {
+      url.searchParams.set('modal', $activeHotspot);
+    } else {
+      url.searchParams.delete('modal');
+      url.searchParams.delete('open');
     }
 
-    if (u === 'admin' && p === 'admin123') {
+    if ($isExplorationMode) {
+      url.searchParams.set('player', 'true');
+    } else {
+      url.searchParams.delete('player');
+      url.searchParams.delete('mode');
+    }
+
+    if ($isManagerDrawerOpen) {
+      url.searchParams.set('dashboard', 'true');
+    } else {
+      url.searchParams.delete('dashboard');
+    }
+
+    if ($isLoginModalOpen) {
+      url.searchParams.set('login', 'true');
+    } else {
+      url.searchParams.delete('login');
+    }
+
+    window.history.replaceState({}, '', url.toString());
+  }
+
+  function applyUrlParameters() {
+    const params = new URLSearchParams(window.location.search);
+
+    // 1. กำหนดสิทธิ์ผู้ใช้งาน (?role=admin | ?role=user | ?role=line | ?role=guest)
+    const roleParam = params.get('role')?.toLowerCase();
+    const customName = params.get('name')?.trim();
+
+    if (roleParam === 'admin') {
       currentUser.set({
         username: 'admin',
-        name: 'ผู้จัดการฝ่ายปฏิบัติการ (Admin)',
-        displayName: 'ผู้จัดการฝ่ายปฏิบัติการ (Admin)',
+        name: customName || 'ผู้จัดการฝ่ายปฏิบัติการ (Admin)',
+        displayName: customName || 'ผู้จัดการฝ่ายปฏิบัติการ (Admin)',
         role: 'admin'
       });
-      isLoginModalOpen.set(false);
-      addToast('ยินดีต้อนรับ Admin', 'เข้าสู่ระบบด้วยสิทธิ์ผู้ดูแลระบบเรียบร้อย', 'success');
-    } else if (u === 'user' && p === 'user123') {
+    } else if (roleParam === 'line') {
+      const lineName = customName || 'Worgurn (LINE Member)';
       currentUser.set({
-        username: 'user',
-        name: 'สมาชิกสระว่ายน้ำ (Member User)',
-        displayName: 'สมาชิกสระว่ายน้ำ (Member User)',
+        username: 'line_user',
+        name: lineName,
+        displayName: lineName,
         role: 'user'
       });
-      isLoginModalOpen.set(false);
-      addToast('ยินดีต้อนรับ Member', 'เข้าสู่ระบบสระว่ายน้ำเรียบร้อย', 'success');
+      addToast('เข้าสู่ระบบผ่าน LINE (URL)', `ยินดีต้อนรับ ${lineName}`, 'success');
+    } else if (roleParam === 'guest') {
+      currentUser.set(null);
     } else {
-      errorMsg = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง (ลองใช้ปุ่ม Quick Login ด้านล่าง)';
+      currentUser.set({
+        username: 'user',
+        name: customName || 'สมาชิกสระว่ายน้ำ (Member User)',
+        displayName: customName || 'สมาชิกสระว่ายน้ำ (Member User)',
+        role: 'user'
+      });
+    }
+
+    // 2. เปิดหน้าต่าง Login (?login=true)
+    if (params.get('login') === 'true') {
+      isLoginModalOpen.set(true);
+    }
+
+    // 3. เปิดหน้าต่างบริการ / จุดต่างๆ (?modal=swimwear | checkin | locker | courses | restroom | water | lifeguard | kids-pool | vip)
+    const modalParam = (params.get('modal') || params.get('open'))?.toLowerCase();
+    if (modalParam) {
+      const validHotspots: HotspotId[] = [
+        'checkin',
+        'locker',
+        'courses',
+        'swimwear',
+        'restroom',
+        'water',
+        'lifeguard',
+        'kids-pool',
+        'vip'
+      ];
+      if (validHotspots.includes(modalParam as HotspotId)) {
+        if (modalParam === 'water' && roleParam !== 'admin') {
+          addToast('จำกัดสิทธิ์เฉพาะผู้ดูแลระบบ', 'กรุณาใช้ ?role=admin เพื่อดูข้อมูล IoT', 'warn');
+        } else {
+          activeHotspot.set(modalParam as HotspotId);
+        }
+      } else if (modalParam === 'reception') {
+        activeHotspot.set('checkin');
+      }
+    }
+
+    // 4. เปลี่ยนมุมกล้องเริ่มต้น (?view=overview | entrance | pool | swimwear | locker | restroom | kids | top)
+    const viewParam = params.get('view')?.toLowerCase();
+    if (viewParam) {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('dp-camera-preset', { detail: viewParam }));
+      }, 300);
+    }
+
+    // 5. เปิดโหมดเดินสำรวจ (?player=true หรือ ?mode=player)
+    const isPlayerParam =
+      params.get('player') === 'true' || params.get('mode')?.toLowerCase() === 'player';
+    if (isPlayerParam) {
+      isExplorationMode.set(true);
+    }
+
+    // 6. เปิดแดชบอร์ดผู้จัดการ (?dashboard=true)
+    if (params.get('dashboard') === 'true') {
+      if (roleParam === 'admin') {
+        isManagerDrawerOpen.set(true);
+      } else {
+        addToast('จำกัดสิทธิ์เฉพาะ Admin', 'เพิ่ม ?role=admin&dashboard=true เพื่อเปิดแดชบอร์ด', 'warn');
+      }
+    }
+
+    // 7. จำลองเหตุฉุกเฉินไลฟ์การ์ดวิ่งรอบสระ (?emergency=true)
+    if (params.get('emergency') === 'true') {
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('dp-lifeguard-emergency'));
+      }, 500);
     }
   }
 
-  function quickLogin(role: 'admin' | 'user') {
-    if (role === 'admin') {
-      username = 'admin';
-      password = 'admin123';
-      handleLogin();
-    } else {
-      username = 'user';
-      password = 'user123';
-      handleLogin();
-    }
-  }
+  onMount(() => {
+    applyUrlParameters();
+    mounted = true;
 
-  function handleWindowKeydown(e: KeyboardEvent) {
-    if ($isLoginModalOpen && e.key === 'Escape') {
-      closeModal();
-    }
-  }
+    const handlePopState = () => applyUrlParameters();
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  });
 </script>
 
-<svelte:window on:keydown={handleWindowKeydown} />
+<main class="relative w-screen h-screen overflow-hidden bg-sky-300 text-slate-100">
+  <Navbar />
+  <Scene3D />
+  <HotspotModal />
+  <ManagerDrawer />
 
-{#if $isLoginModalOpen}
-  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 select-none">
-    <button
-      type="button"
-      class="absolute inset-0 bg-slate-950/75 backdrop-blur-sm cursor-pointer"
-      on:click={closeModal}
-      aria-label="ปิดหน้าต่างเข้าสู่ระบบ"
-    ></button>
+  {#if $isLoginModalOpen}
+    <LoginPage />
+  {/if}
 
-    <div
-      class="relative z-10 w-full max-w-md rounded-3xl bg-slate-900/95 p-6 sm:p-8 border border-cyan-500/25 shadow-2xl"
-    >
-      <button
-        type="button"
-        on:click|stopPropagation={closeModal}
-        aria-label="ปิด"
-        class="absolute top-4 right-4 z-20 w-9 h-9 rounded-xl bg-slate-800 hover:bg-rose-600 border border-slate-700 grid place-items-center text-slate-300 hover:text-white transition cursor-pointer"
-      >
-        <X class="w-4 h-4" />
-      </button>
-
-      <div class="flex flex-col items-center text-center mb-6">
-        <div
-          class="w-13 h-13 rounded-2xl bg-gradient-to-br from-cyan-400 to-sky-600 grid place-items-center shadow-lg shadow-cyan-500/30 mb-3"
-        >
-          <Waves class="w-7 h-7 text-slate-900" />
-        </div>
-        <h2 class="text-xl font-extrabold text-white tracking-tight">เข้าสู่ระบบ Digital Pools</h2>
-        <p class="text-xs text-slate-400 mt-1">
-          เข้าสู่ระบบเพื่อจัดการแดชบอร์ด หรือปิดหน้านี้เพื่อเข้าชมและใช้งานทั่วไปได้ทันที
-        </p>
-      </div>
-
-      <form on:submit|preventDefault={handleLogin} class="space-y-3.5">
-        <div>
-          <label for="username" class="block text-xs font-semibold text-slate-300 mb-1"
-            >ชื่อผู้ใช้งาน (Username)</label
-          >
-          <div class="relative">
-            <span
-              class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500"
-            >
-              <User class="w-4 h-4" />
-            </span>
-            <input
-              id="username"
-              bind:value={username}
-              placeholder="admin หรือ user"
-              class="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-100 placeholder:text-slate-600 outline-none focus:border-cyan-400 transition"
-            />
-          </div>
-        </div>
-
-        <div>
-          <label for="password" class="block text-xs font-semibold text-slate-300 mb-1"
-            >รหัสผ่าน (Password)</label
-          >
-          <div class="relative">
-            <span
-              class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500"
-            >
-              <Lock class="w-4 h-4" />
-            </span>
-            <input
-              id="password"
-              type="password"
-              bind:value={password}
-              placeholder="••••••••"
-              class="w-full bg-slate-900/80 border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-100 placeholder:text-slate-600 outline-none focus:border-cyan-400 transition"
-            />
-          </div>
-        </div>
-
-        {#if errorMsg}
-          <div
-            class="p-2.5 rounded-xl bg-red-500/15 border border-red-500/30 text-red-300 text-[11px] text-center font-medium"
-          >
-            {errorMsg}
-          </div>
-        {/if}
-
-        <button
-          type="submit"
-          class="w-full py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-sky-600 hover:from-cyan-400 hover:to-sky-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/25 transition active:scale-[0.98] cursor-pointer"
-        >
-          <span>เข้าสู่ระบบ</span>
-          <ArrowRight class="w-4 h-4" />
-        </button>
-      </form>
-
-      <div class="mt-5 pt-4 border-t border-slate-700/60 space-y-3">
-        <div class="text-[10px] text-slate-400 font-medium text-center">
-          ปุ่มลัดทดสอบสิทธิ์ (Demo Accounts)
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            on:click={() => quickLogin('admin')}
-            class="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/70 border border-amber-400/40 text-left transition cursor-pointer"
-          >
-            <div class="flex items-center gap-1.5 text-amber-300 font-bold text-[11px]">
-              <ShieldCheck class="w-3.5 h-3.5" />
-              <span>Admin</span>
-            </div>
-            <div class="text-[9px] text-slate-400">สิทธิ์เต็ม + IoT + Dashboard</div>
-          </button>
-
-          <button
-            type="button"
-            on:click={() => quickLogin('user')}
-            class="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/70 border border-emerald-400/40 text-left transition cursor-pointer"
-          >
-            <div class="flex items-center gap-1.5 text-emerald-300 font-bold text-[11px]">
-              <UserCheck class="w-3.5 h-3.5" />
-              <span>User</span>
-            </div>
-            <div class="text-[9px] text-slate-400">สิทธิ์สมาชิกทั่วไป</div>
-          </button>
-        </div>
-
-        <button
-          type="button"
-          on:click={closeModal}
-          class="w-full py-2 rounded-xl border border-slate-700 bg-slate-800/70 hover:bg-slate-700 text-xs font-medium text-slate-300 hover:text-white transition cursor-pointer"
-        >
-          เข้าชมและใช้งานเว็บไซต์โดยไม่ต้องล็อกอิน
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
+  <ToastContainer />
+</main>

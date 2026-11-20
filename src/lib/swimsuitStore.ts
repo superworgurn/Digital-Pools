@@ -6,11 +6,14 @@ import {
   swimsuitOrders
 } from './stores';
 import type {
-  SwimsuitItem,
-  SwimsuitRental,
+  SwimsuitCatalogItem,
+  SwimsuitOrder,
   SwimsuitCartItem,
   SwimsuitSize
 } from '../types';
+
+export type SwimsuitItem = SwimsuitCatalogItem;
+export type SwimsuitRental = SwimsuitOrder;
 
 export {
   SWIMSUIT_CATALOG,
@@ -25,15 +28,17 @@ export const swimsuitRentals = swimsuitOrders;
 export const swimsuitStats = derived(
   [SWIMSUIT_CATALOG, swimsuitOrders],
   ([$catalog, $orders]) => {
-    const activeRentals = $orders.filter(
-      (r) => r.status === 'paid' || r.status === 'rented'
-    ).length;
+    const activeRentals = $orders.filter((r) => r.status === 'paid').length;
 
     const totalRevenue = $orders
-      .filter((r) => r.status === 'paid' || r.status === 'rented' || r.status === 'returned')
-      .reduce((sum, r) => sum + Number(r.totalAmount || r.subtotal || 0), 0);
+      .filter((r) => r.status === 'paid')
+      .reduce((sum, r) => sum + Number(r.totalAmount || r.subtotalBeforeDiscount || 0), 0);
 
-    const availableItems = $catalog.filter((item) => item.available !== false).length;
+    const availableItems = $catalog.filter((item) => {
+      const rentTotal = Object.values(item.rentStock || {}).reduce((s, n) => s + (n || 0), 0);
+      const buyTotal = Object.values(item.buyStock || {}).reduce((s, n) => s + (n || 0), 0);
+      return rentTotal + buyTotal > 0;
+    }).length;
 
     return {
       activeRentals,
@@ -44,17 +49,16 @@ export const swimsuitStats = derived(
 );
 
 export function createCartItemFromSelection(
-  product: SwimsuitItem,
+  product: SwimsuitCatalogItem,
   size: SwimsuitSize,
   quantity: number,
   orderType: 'rent' | 'buy' = 'rent',
   rentalDays: number = 1
 ): SwimsuitCartItem {
   const mod = SIZE_PRICE_MODIFIERS[size] || SIZE_PRICE_MODIFIERS.M;
-  const baseRent = product.rentPrice ?? product.rentalPrice ?? 80;
-  const baseBuy = product.buyPrice ?? product.price ?? 450;
-  const depositPerUnit =
-    orderType === 'rent' ? (product.depositPrice ?? product.deposit ?? 100) : 0;
+  const baseRent = product.rentPrice ?? 80;
+  const baseBuy = product.buyPrice ?? 450;
+  const depositPerUnit = orderType === 'rent' ? (product.depositPrice ?? 100) : 0;
 
   const unitPrice =
     orderType === 'rent'
@@ -71,8 +75,7 @@ export function createCartItemFromSelection(
     cartItemId: `cart-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     itemId: product.id,
     swimsuitId: product.id,
-    name: `${product.nameTH || product.name} (${defaultColor.colorName})`,
-    nameTH: product.nameTH || product.name,
+    name: `${product.name} (${defaultColor.colorName})`,
     orderType,
     size,
     colorName: defaultColor.colorName,
@@ -88,26 +91,21 @@ export function createCartItemFromSelection(
 }
 
 export function returnSwimsuitOrder(orderId: string) {
-  swimsuitOrders.update((orders: SwimsuitRental[]) =>
+  swimsuitOrders.update((orders: SwimsuitOrder[]) =>
     orders.map((o) => {
-      if (o.id !== orderId) return o;
+      if (o.id !== orderId || o.status === 'cancelled') return o;
       SWIMSUIT_CATALOG.update((catalog) =>
         catalog.map((item) => {
           const nextRentStock = { ...item.rentStock };
-          const nextBuyStock = { ...item.buyStock };
           o.items.forEach((ci) => {
-            if (ci.itemId === item.id) {
-              if (ci.orderType === 'rent') {
-                nextRentStock[ci.size] = (nextRentStock[ci.size] || 0) + ci.quantity;
-              } else {
-                nextBuyStock[ci.size] = (nextBuyStock[ci.size] || 0) + ci.quantity;
-              }
+            if (ci.itemId === item.id && ci.orderType === 'rent') {
+              nextRentStock[ci.size] = (nextRentStock[ci.size] || 0) + ci.quantity;
             }
           });
-          return { ...item, rentStock: nextRentStock, buyStock: nextBuyStock };
+          return { ...item, rentStock: nextRentStock };
         })
       );
-      return { ...o, status: 'returned' as const };
+      return o;
     })
   );
 }
