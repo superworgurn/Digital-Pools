@@ -55,9 +55,9 @@ interface TurnstileGate {
   z: number;
   scanZ: number;
   exitZ: number;
-  flapOpenAmount: number; // 0 = ปิดสนิท, 1 = เปิดสุด
+  flapOpenAmount: number;
   targetOpen: number;
-  occupantId: string | null; // ล็อกให้เข้าได้ทีละ 1 คนเท่านั้น
+  occupantId: string | null;
   scanPulse: number;
 }
 
@@ -112,15 +112,16 @@ export class PoolDigitalTwinEngine {
   private centerY = 300;
   private lastUiSyncTime = 0;
 
+  // ซูมเข้ามาใกล้ขึ้น (32 แทน 39) เพื่อให้ลานสระขนาดใหญ่เต็มตาและป้ายกระจายตัวไม่เบียดกัน
   private camYaw = -0.52;
   private camPitch = 0.66;
-  private camDistance = 39;
-  private camTarget: Vec3 = { x: -1.0, y: 0, z: 2.5 };
+  private camDistance = 32;
+  private camTarget: Vec3 = { x: -0.8, y: 0.2, z: 1.8 };
 
   private targetCamYaw = -0.52;
   private targetCamPitch = 0.66;
-  private targetCamDistance = 39;
-  private targetCamLook: Vec3 = { x: -1.0, y: 0, z: 2.5 };
+  private targetCamDistance = 32;
+  private targetCamLook: Vec3 = { x: -0.8, y: 0.2, z: 1.8 };
 
   private isDragging = false;
   private dragMode: 'orbit' | 'pan' = 'orbit';
@@ -128,7 +129,7 @@ export class PoolDigitalTwinEngine {
   private lastPointerX = 0;
   private lastPointerY = 0;
   private initialPinchDistance = 0;
-  private initialPinchCamDistance = 39;
+  private initialPinchCamDistance = 32;
   private lastTapTime = 0;
 
   private swimmers: { x: number; z: number; speed: number; dir: number; color: string }[] = [
@@ -138,7 +139,6 @@ export class PoolDigitalTwinEngine {
     { x: 3.5, z: 1.0, speed: 2.2, dir: -1, color: '#10b981' }
   ];
 
-  // ราวกั้นแบบรถไฟฟ้า BTS/MRT ทั้ง 2 ฝั่ง (ทางไปร้านเช่าชุด และ ฝั่งที่ไป 7/11) เปิดให้เข้าทีละ 1 คนเท่านั้น
   private turnstileGates: TurnstileGate[] = [
     {
       id: 'shop-gate',
@@ -166,7 +166,6 @@ export class PoolDigitalTwinEngine {
 
   private swimsuitNpcs: SwimsuitNpcAgent[] = [];
 
-  // สถานะไลฟ์การ์ดวิ่งรอบสระตอนฉุกเฉิน
   private lifeguardPos: Vec3 = { x: 10.5, y: 2.2, z: -6.5 };
   private lifeguardEmergencyActive = false;
   private lifeguardPhase = 0;
@@ -194,7 +193,7 @@ export class PoolDigitalTwinEngine {
       title: 'จุดเช็คอิน',
       subtitle: 'อยู่หลังทางเข้า-ออก • สแกน QR เข้าสระ',
       icon: '🎟️',
-      pos: { x: -1.5, y: 2.8, z: 10.2 },
+      pos: { x: -1.5, y: 3.1, z: 10.2 },
       interactPos: { x: -1.5, y: 0, z: 11.2 }
     },
     {
@@ -202,7 +201,7 @@ export class PoolDigitalTwinEngine {
       title: 'เช่า/ซื้อชุดว่ายน้ำ',
       subtitle: 'ข้างจุดเช็คอิน • เลือกไซส์ & จ่าย QR',
       icon: '👙',
-      pos: { x: -10.5, y: 2.9, z: 10.2 },
+      pos: { x: -11.5, y: 3.2, z: 9.0 },
       interactPos: { x: -10.5, y: 0, z: 11.8 }
     },
     {
@@ -218,7 +217,7 @@ export class PoolDigitalTwinEngine {
       title: 'ห้องน้ำ & เปลี่ยนชุด',
       subtitle: 'SHOWER ROOMS',
       icon: '🚿',
-      pos: { x: -11.8, y: 2.8, z: -14.5 },
+      pos: { x: -11.8, y: 2.9, z: -14.5 },
       interactPos: { x: -11.8, y: 0, z: -12.8 }
     },
     {
@@ -242,7 +241,7 @@ export class PoolDigitalTwinEngine {
       title: 'ไลฟ์การ์ด',
       subtitle: 'ดูแลความปลอดภัย',
       icon: '🛟',
-      pos: { x: 10.5, y: 3.7, z: -6.5 },
+      pos: { x: 10.5, y: 3.8, z: -6.5 },
       interactPos: { x: 9.2, y: 0, z: -6.5 }
     },
     {
@@ -250,11 +249,12 @@ export class PoolDigitalTwinEngine {
       title: 'สระเด็ก & สไลเดอร์',
       subtitle: 'โซนน้ำตื้นปลอดภัย',
       icon: '🛝',
-      pos: { x: 12.2, y: 1.8, z: 1.5 },
+      pos: { x: 12.2, y: 1.8, z: 1.8 },
       interactPos: { x: 10.5, y: 0, z: 1.5 }
     }
   ];
 
+  // คงเฉพาะป้ายจุดสำคัญที่ไม่ซ้ำซ้อนกับปุ่ม Hotspot
   private worldLabels3D: {
     id: string;
     text: string;
@@ -264,55 +264,27 @@ export class PoolDigitalTwinEngine {
   }[] = [
     {
       id: 'lbl-gate',
-      text: '🚪 ทางเข้า-ออก (ENTRANCE / EXIT)',
-      pos: { x: -1.5, y: 2.4, z: 15.6 },
+      text: '🚪 ทางเข้า-ออก',
+      pos: { x: -1.5, y: 2.1, z: 16.2 },
       variant: 'dark-badge'
     },
     {
-      id: 'lbl-checkin-sub',
-      text: 'จุดเช็คอินสระว่ายน้ำ',
-      subtext: 'สแกน QR / รับสายรัดข้อมือ',
-      pos: { x: -1.5, y: 1.1, z: 11.4 },
-      variant: 'white-tag'
-    },
-    {
-      id: 'lbl-shop-sub',
-      text: 'ร้านเช่า & ซื้อชุดว่ายน้ำ',
-      subtext: 'รับสายข้อมือ RFID หน้าเคาน์เตอร์',
-      pos: { x: -10.5, y: 1.1, z: 11.6 },
-      variant: 'white-tag'
-    },
-    {
       id: 'lbl-gate-shop',
-      text: '🚇 ราวกั้น RFID (ฝั่งเช่าชุด)',
-      subtext: 'สแกนเข้าทีละ 1 คน',
-      pos: { x: -6.0, y: 2.1, z: 10.2 },
+      text: '🚇 RFID (1 คน)',
+      pos: { x: -6.0, y: 1.4, z: 10.2 },
       variant: 'dark-badge'
     },
     {
       id: 'lbl-gate-711',
-      text: '🚇 ราวกั้น RFID (ฝั่ง 7/11)',
-      subtext: 'สแกนเข้าทีละ 1 คน',
-      pos: { x: 3.1, y: 2.1, z: 10.2 },
+      text: '🚇 RFID (1 คน)',
+      pos: { x: 3.1, y: 1.4, z: 10.2 },
       variant: 'dark-badge'
     },
     {
       id: 'lbl-711-scenery',
       text: '7-ELEVEN',
-      pos: { x: 8.2, y: 3.25, z: 10.5 },
+      pos: { x: 9.2, y: 3.1, z: 11.2 },
       variant: 'white-tag'
-    },
-    {
-      id: 'lbl-shower',
-      text: 'SHOWER ROOMS',
-      pos: { x: -11.8, y: 3.3, z: -15.2 },
-      variant: 'dark-badge'
-    },
-    {
-      id: 'lbl-kids-badge',
-      text: 'KIDS POOL',
-      pos: { x: 12.2, y: 2.5, z: -1.2 },
-      variant: 'dark-badge'
     }
   ];
 
@@ -352,11 +324,8 @@ export class PoolDigitalTwinEngine {
 
     this.handleResize();
 
-    // ลูกค้าคนที่ 1: เดินเข้าร้าน -> เคาน์เตอร์ -> รับสายข้อมือ RFID -> สแกนราวกั้นฝั่งร้านเช่าชุด -> ลงสระ
     this.spawnSwimsuitRentalNpc(0xdb2777, 'ลูกค้า #1', 0, 'shop-gate', 'main');
-    // ลูกค้าคนที่ 2: เดินตามมาต่อคิวราวกั้นทีละคน
-    this.spawnSwimsuitRentalNpc(0x0284c7, 'ลูกค้า #2', 2.4, 'shop-gate', 'main');
-    // ลูกค้าฝั่ง 7/11: เดินไปสแกนสายข้อมือ RFID ที่ราวกั้นฝั่ง 7/11 -> เข้าสระ
+    this.spawnSwimsuitRentalNpc(0x0284c7, 'ลูกค้า #2', 2.8, 'shop-gate', 'main');
     this.spawnSevenElevenSideNpc(0xf59e0b, 'ลูกค้าฝั่ง 7/11');
 
     this.bindEvents();
@@ -368,6 +337,18 @@ export class PoolDigitalTwinEngine {
     return '#' + num.toString(16).padStart(6, '0');
   }
 
+  private getEffectiveCamDistance(baseDistance: number): number {
+    if (!this.canvas || this.canvas.width <= 0 || this.canvas.height <= 0) {
+      return baseDistance;
+    }
+    const aspect = this.canvas.width / this.canvas.height;
+    if (aspect < 0.95) {
+      const portraitMultiplier = Math.min(1.22, Math.max(1.04, 0.64 / Math.max(0.48, aspect)));
+      return baseDistance * portraitMultiplier;
+    }
+    return baseDistance;
+  }
+
   private updateCameraTrigCache() {
     this.sinY = Math.sin(this.camYaw);
     this.cosY = Math.cos(this.camYaw);
@@ -376,6 +357,7 @@ export class PoolDigitalTwinEngine {
   }
 
   private project3D(x: number, y: number, z: number): ProjectedPoint {
+    const effDist = this.getEffectiveCamDistance(this.camDistance);
     const dx = x - this.camTarget.x;
     const dy = y - this.camTarget.y;
     const dz = z - this.camTarget.z;
@@ -384,7 +366,7 @@ export class PoolDigitalTwinEngine {
     const rz1 = dx * this.sinY + dz * this.cosY;
 
     const ry = dy * this.cosP - rz1 * this.sinP;
-    const rz = this.camDistance - dy * this.sinP - rz1 * this.cosP;
+    const rz = effDist - dy * this.sinP - rz1 * this.cosP;
 
     if (rz <= 1.0) {
       return { x: -9999, y: -9999, z: rz, scale: 0, visible: false };
@@ -518,18 +500,13 @@ export class PoolDigitalTwinEngine {
     );
   }
 
-  /**
-   * วาดราวกั้นอัตโนมัติแบบเดียวกับรถไฟฟ้า BTS/MRT (Automatic RFID Flap Barrier Gate)
-   * เปิดให้ผ่านได้ทีละ 1 คนเท่านั้น พร้อมเครื่องสแกนสายข้อมือ RFID และบานกั้นปีกผีเสื้อ
-   */
   private drawBtsTurnstileGate3D(gate: TurnstileGate) {
-    const laneHalfW = 0.68; // ความกว้างช่องเดินสำหรับเข้าทีละ 1 คน
+    const laneHalfW = 0.68;
     const leftCabinetX = gate.x - laneHalfW - 0.16;
     const rightCabinetX = gate.x + laneHalfW + 0.16;
     const isOpen = gate.flapOpenAmount > 0.45;
     const ledColor = isOpen ? '#10b981' : gate.occupantId ? '#f59e0b' : '#06b6d4';
 
-    // เส้นเหลืองหยุดรอคิวหน้าราวกั้น (บังคับเข้าทีละคน)
     this.drawQuad3D(
       { x: gate.x - laneHalfW, y: 0.02, z: gate.scanZ + 0.35 },
       { x: gate.x + laneHalfW, y: 0.02, z: gate.scanZ + 0.35 },
@@ -538,28 +515,21 @@ export class PoolDigitalTwinEngine {
       '#facc15'
     );
 
-    // ตู้สแตนเลสซ้ายของราวกั้นรถไฟฟ้า
     this.drawBox3D(leftCabinetX, 0.52, gate.z, 0.3, 1.04, 1.75, '#f1f5f9', '#cbd5e1', '#94a3b8', '#64748b');
     this.drawBox3D(leftCabinetX, 1.08, gate.z, 0.32, 0.08, 1.78, '#0f172a', '#1e293b', '#334155');
-    // แถบไฟ LED บอกสถานะบนตู้ซ้าย
     this.drawBox3D(leftCabinetX, 1.13, gate.z, 0.1, 0.04, 1.5, ledColor, ledColor, ledColor);
 
-    // ตู้สแตนเลสขวาของราวกั้นรถไฟฟ้า + เครื่องสแกน RFID
     this.drawBox3D(rightCabinetX, 0.52, gate.z, 0.3, 1.04, 1.75, '#f1f5f9', '#cbd5e1', '#94a3b8', '#64748b');
     this.drawBox3D(rightCabinetX, 1.08, gate.z, 0.32, 0.08, 1.78, '#0f172a', '#1e293b', '#334155');
-    // แถบไฟ LED บอกสถานะบนตู้ขวา
     this.drawBox3D(rightCabinetX, 1.13, gate.z, 0.1, 0.04, 1.5, ledColor, ledColor, ledColor);
 
-    // แท่นเครื่องสแกนสายข้อมือ RFID ด้านหน้าตู้ขวา
     const readerZ = gate.z + 0.62;
     this.drawBox3D(rightCabinetX, 1.18, readerZ, 0.28, 0.14, 0.34, '#38bdf8', '#0284c7', '#0369a1');
     this.drawBox3D(rightCabinetX, 1.26, readerZ, 0.22, 0.03, 0.26, ledColor, ledColor, ledColor);
 
-    // บานกั้นปีกผีเสื้อ (Retractable Acrylic Flap Wings) ตรงกลางช่องทางเดิน
     const closedSpan = laneHalfW - 0.04;
     const wingWidth = Math.max(0.04, closedSpan * (1 - gate.flapOpenAmount));
     if (wingWidth > 0.05) {
-      // ปีกซ้าย
       this.drawBox3D(
         gate.x - laneHalfW + wingWidth * 0.5,
         0.54,
@@ -572,7 +542,6 @@ export class PoolDigitalTwinEngine {
         'rgba(190, 18, 60, 0.92)',
         '#fda4af'
       );
-      // ปีกขวา
       this.drawBox3D(
         gate.x + laneHalfW - wingWidth * 0.5,
         0.54,
@@ -587,7 +556,6 @@ export class PoolDigitalTwinEngine {
       );
     }
 
-    // เอฟเฟกต์วงคลื่นสแกนสายข้อมือ RFID
     if (gate.scanPulse > 0.05) {
       const padProj = this.project3D(rightCabinetX, 1.32, readerZ);
       if (padProj.visible) {
@@ -603,14 +571,9 @@ export class PoolDigitalTwinEngine {
     }
   }
 
-  /**
-   * วาดรั้วกระจกและสแตนเลสกั้นแนวทางเดิน บังคับให้คนเดินผ่านราวกั้นรถไฟฟ้าทั้ง 2 ฝั่งเท่านั้น
-   */
   private drawGlassPartition3D(cx: number, cz: number, widthX: number) {
     if (widthX <= 0.1) return;
-    // ฐานสแตนเลส
     this.drawBox3D(cx, 0.1, cz, widthX, 0.2, 0.16, '#94a3b8', '#64748b', '#475569');
-    // แผ่นกระจกใสกั้นโซน
     this.drawBox3D(
       cx,
       0.62,
@@ -623,7 +586,6 @@ export class PoolDigitalTwinEngine {
       'rgba(56, 189, 248, 0.48)',
       '#7dd3fc'
     );
-    // ราวจับสแตนเลสด้านบน
     this.drawBox3D(cx, 1.06, cz, widthX, 0.06, 0.12, '#e2e8f0', '#cbd5e1', '#94a3b8');
   }
 
@@ -761,7 +723,6 @@ export class PoolDigitalTwinEngine {
       }
     }
 
-    // แสดงสายข้อมือ RFID บนข้อมือ NPC (ยื่นมือไปแตะเมื่อรับสายข้อมือหรือสแกนราวกั้น)
     if (hasRfidWristband) {
       const armReachX = isScanningRfid ? 0.52 : 0.36;
       const armReachY = isScanningRfid ? 1.15 : 0.85;
@@ -814,7 +775,7 @@ export class PoolDigitalTwinEngine {
       streetClothesColor: streetColor,
       hasRfidWristband: false,
       isScanningRfid: false,
-      statusText: `🚶 ${customLabel}: เดินเข้าร้านเช่าชุดว่ายน้ำ`,
+      statusText: '🚶 เข้าร้าน',
       statusColor: '#0284c7',
       swimDirection: 1,
       laneZ: -4.2 + Math.random() * 5.0
@@ -842,7 +803,7 @@ export class PoolDigitalTwinEngine {
       streetClothesColor: '#f59e0b',
       hasRfidWristband: true,
       isScanningRfid: false,
-      statusText: `⌚ ${customLabel}: ถือสายข้อมือ RFID เดินไปราวกั้นฝั่ง 7/11`,
+      statusText: '⌚ ไปราวกั้น',
       statusColor: '#d97706',
       swimDirection: -1,
       laneZ: -1.2
@@ -863,7 +824,6 @@ export class PoolDigitalTwinEngine {
   }
 
   private updateSwimsuitNpcs(dt: number) {
-    // อัปเดตสถานะราวกั้นรถไฟฟ้าทั้ง 2 ฝั่ง (เปิดได้ทีละ 1 คนเท่านั้น)
     for (let g = 0; g < this.turnstileGates.length; g++) {
       const gate = this.turnstileGates[g];
 
@@ -879,7 +839,6 @@ export class PoolDigitalTwinEngine {
         }
       }
 
-      // ถ้าผู้เล่นในโหมดเดินสำรวจเดินมาที่ราวกั้น และไม่มี NPC ใช้งานอยู่ เปิดให้ผู้เล่นผ่านทีละคน
       if (this.isExploration && !gate.occupantId) {
         const playerDist = Math.hypot(this.playerPos.x - gate.x, this.playerPos.z - gate.z);
         if (playerDist < 1.35) {
@@ -915,32 +874,29 @@ export class PoolDigitalTwinEngine {
 
       switch (npc.state) {
         case 'WALK_INTO_SHOP': {
-          // 1. เดินเข้าร้านเช่าชุดว่ายน้ำ
           const dist = this.moveTowards(npc.pos, shopEntrancePos, npc.speed * dt);
           if (dist < 0.32) {
             npc.state = 'WALK_TO_COUNTER';
             npc.timer = 0;
-            npc.statusText = `💁 ${npc.label}: เดินไปที่หน้าเคาน์เตอร์`;
+            npc.statusText = '💁 เคาน์เตอร์';
             npc.statusColor = '#0284c7';
           }
           break;
         }
 
         case 'WALK_TO_COUNTER': {
-          // 2. เดินไปที่หน้าเคาน์เตอร์ในร้าน
           const dist = this.moveTowards(npc.pos, shopCounterPos, npc.speed * 0.85 * dt);
           if (dist < 0.25) {
             npc.state = 'RECEIVING_RFID';
             npc.timer = 0;
             npc.isScanningRfid = true;
-            npc.statusText = `⌚ ${npc.label}: รับสายข้อมือ RFID ที่หน้าเคาน์เตอร์`;
+            npc.statusText = '⌚ รับสายข้อมือ';
             npc.statusColor = '#db2777';
           }
           break;
         }
 
         case 'RECEIVING_RFID': {
-          // 3. รับสายข้อมือ RFID จากพนักงาน
           npc.timer += dt;
           if (npc.timer > 0.65) {
             npc.hasRfidWristband = true;
@@ -949,14 +905,13 @@ export class PoolDigitalTwinEngine {
             npc.isScanningRfid = false;
             npc.state = 'WALK_TO_GATE';
             npc.timer = 0;
-            npc.statusText = '🚶 นำสายข้อมือ RFID เดินไปที่ราวกั้น';
+            npc.statusText = '🚶 ไปราวกั้น';
             npc.statusColor = '#0891b2';
           }
           break;
         }
 
         case 'WALK_TO_GATE': {
-          // 4. เดินไปยังหน้าจุดต่อคิวของราวกั้นรถไฟฟ้า
           const queueFrontPos: Vec3 = { x: gate.x, y: 0, z: gate.scanZ + 1.25 };
           const dist = this.moveTowards(npc.pos, queueFrontPos, npc.speed * dt);
           if (dist < 0.32) {
@@ -967,7 +922,6 @@ export class PoolDigitalTwinEngine {
         }
 
         case 'WAIT_GATE_QUEUE': {
-          // 5. ต่อคิวหน้าราวกั้น — ราวกั้นจะเปิดให้เข้าทีละคนเท่านั้น!
           const waitingList = this.swimsuitNpcs.filter(
             (other) =>
               other.gateSide === gate.id &&
@@ -977,13 +931,9 @@ export class PoolDigitalTwinEngine {
           const slotZ = gate.scanZ + 1.05 + Math.max(0, myQueueIndex) * 1.15;
           this.moveTowards(npc.pos, { x: gate.x, y: 0, z: slotZ }, npc.speed * 0.85 * dt);
 
-          npc.statusText =
-            myQueueIndex === 0
-              ? '⌚ พร้อมสแกนสายข้อมือ RFID (เข้าทีละ 1 คน)'
-              : `⏳ ต่อคิวหน้าราวกั้น (ลำดับที่ ${myQueueIndex + 1} • เข้าทีละคน)`;
+          npc.statusText = myQueueIndex === 0 ? '⌚ รอสแกน' : `⏳ คิว #${myQueueIndex + 1}`;
           npc.statusColor = '#d97706';
 
-          // อนุญาตเฉพาะคิวแรก (index 0) และเมื่อราวกั้นว่าง + บานกั้นปิดสนิทแล้วเท่านั้น
           if (myQueueIndex === 0 && gate.occupantId === null && gate.flapOpenAmount < 0.12) {
             gate.occupantId = npc.id;
             npc.state = 'SCANNING_RFID';
@@ -993,20 +943,18 @@ export class PoolDigitalTwinEngine {
         }
 
         case 'SCANNING_RFID': {
-          // 6. เดินชิดเครื่องสแกนและนำสายข้อมือ RFID แตะที่เครื่องของราวกั้น
           const scanStandPos: Vec3 = { x: gate.x, y: 0, z: gate.scanZ };
           const dist = this.moveTowards(npc.pos, scanStandPos, npc.speed * 0.85 * dt);
           if (dist < 0.22) {
             npc.isScanningRfid = true;
             npc.timer += dt;
             gate.scanPulse = 1;
-            npc.statusText = '📡 กำลังสแกนสายข้อมือ RFID ที่เครื่องราวกั้น...';
+            npc.statusText = '📡 สแกน RFID';
             npc.statusColor = '#0284c7';
 
             if (npc.timer >= 0.85) {
-              // 7. เครื่องเปิด! (เฉพาะ 1 ท่านนี้)
               gate.targetOpen = 1;
-              npc.statusText = '✅ เครื่องเปิด! กำลังผ่านราวกั้น (1 ท่าน)';
+              npc.statusText = '✅ เปิด (1 คน)';
               npc.statusColor = '#059669';
 
               if (gate.flapOpenAmount >= 0.72) {
@@ -1020,24 +968,21 @@ export class PoolDigitalTwinEngine {
         }
 
         case 'PASSING_GATE': {
-          // 8. เดินผ่านช่องราวกั้นทีละคน
           gate.targetOpen = 1;
           const pastGatePos: Vec3 = { x: gate.x, y: 0, z: gate.exitZ - 0.35 };
           const dist = this.moveTowards(npc.pos, pastGatePos, npc.speed * 0.95 * dt);
           if (dist < 0.25 || npc.pos.z <= gate.exitZ) {
-            // พ้นเซ็นเซอร์ราวกั้นแล้ว -> ปิดราวกั้นทันทีและปลดล็อกให้คนถัดไป
             gate.occupantId = null;
             gate.targetOpen = 0;
             npc.state = 'WALK_TO_POOL';
             npc.timer = 0;
-            npc.statusText = '🏊‍♂️ ผ่านราวกั้นแล้ว! เดินเข้าไปในสระว่ายน้ำ';
+            npc.statusText = '🏊‍♂️ ลงสระ';
             npc.statusColor = '#059669';
           }
           break;
         }
 
         case 'WALK_TO_POOL': {
-          // 9. เดินเข้าไปในสระว่ายน้ำ
           const poolTarget = npc.targetPool === 'kids' ? kidsPoolEntryPos : mainPoolEntryPos;
           const dist = this.moveTowards(npc.pos, poolTarget, npc.speed * dt);
           if (dist < 0.4) {
@@ -1049,8 +994,7 @@ export class PoolDigitalTwinEngine {
             } else {
               npc.pos = { x: -6.2, y: 0.1, z: npc.laneZ };
             }
-            npc.statusText = '💦 กำลังว่ายน้ำในสระว่ายน้ำ';
-            npc.statusColor = '#0284c7';
+            npc.statusText = '';
           }
           break;
         }
@@ -1068,21 +1012,20 @@ export class PoolDigitalTwinEngine {
           }
 
           if (npc.timer > 18) {
-            // วนรอบใหม่เพื่อให้เห็นการทำงานต่อเนื่อง
             if (npc.gateSide === 'seven-gate') {
               npc.pos = { x: 6.6, y: 0, z: 12.8 };
               npc.currentClothColor = npc.streetClothesColor;
               npc.hasRfidWristband = true;
               npc.state = 'WALK_TO_GATE';
               npc.timer = 0;
-              npc.statusText = `⌚ ${npc.label}: ถือสายข้อมือ RFID เดินไปราวกั้นฝั่ง 7/11`;
+              npc.statusText = '⌚ ไปราวกั้น';
             } else {
               npc.pos = { x: -1.5, y: 0, z: 16.5 };
               npc.currentClothColor = npc.streetClothesColor;
               npc.hasRfidWristband = false;
               npc.state = 'WALK_INTO_SHOP';
               npc.timer = 0;
-              npc.statusText = `🚶 ${npc.label}: เดินเข้าร้านเช่าชุดว่ายน้ำ`;
+              npc.statusText = '🚶 เข้าร้าน';
             }
             npc.statusColor = '#0284c7';
           }
@@ -1094,14 +1037,15 @@ export class PoolDigitalTwinEngine {
 
   private drawClouds(w: number, h: number) {
     this.ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+    const scaleCloud = w < h ? 0.75 : 1;
     const clouds = [
-      { cx: w * 0.48, cy: h * 0.08, r: 42 },
-      { cx: w * 0.51, cy: h * 0.07, r: 52 },
-      { cx: w * 0.55, cy: h * 0.085, r: 38 },
-      { cx: w * 0.22, cy: h * 0.13, r: 30 },
-      { cx: w * 0.25, cy: h * 0.125, r: 36 },
-      { cx: w * 0.78, cy: h * 0.14, r: 32 },
-      { cx: w * 0.81, cy: h * 0.135, r: 40 }
+      { cx: w * 0.48, cy: h * 0.14, r: 42 * scaleCloud },
+      { cx: w * 0.51, cy: h * 0.13, r: 52 * scaleCloud },
+      { cx: w * 0.55, cy: h * 0.145, r: 38 * scaleCloud },
+      { cx: w * 0.22, cy: h * 0.19, r: 30 * scaleCloud },
+      { cx: w * 0.25, cy: h * 0.185, r: 36 * scaleCloud },
+      { cx: w * 0.78, cy: h * 0.2, r: 32 * scaleCloud },
+      { cx: w * 0.81, cy: h * 0.195, r: 40 * scaleCloud }
     ];
     this.ctx.beginPath();
     for (let i = 0; i < clouds.length; i++) {
@@ -1123,7 +1067,6 @@ export class PoolDigitalTwinEngine {
 
     this.drawClouds(w, h);
 
-    // ฐานพื้นลานสระว่ายน้ำสีเทาอ่อน
     this.drawBox3D(0, -0.35, 0, 38, 0.7, 38, '#dce2e8', '#cbd5e1', '#94a3b8');
 
     const tileStep = 4.75;
@@ -1146,7 +1089,6 @@ export class PoolDigitalTwinEngine {
     this.ctx.lineWidth = 1;
     this.ctx.stroke();
 
-    // ทางเดินหลักด้านหน้าเชื่อมทางเข้า -> ร้านเช่าชุด -> จุดเช็คอิน -> 7/11
     this.drawQuad3D(
       { x: -12.0, y: 0.015, z: 12.2 },
       { x: 9.5, y: 0.015, z: 12.2 },
@@ -1155,7 +1097,6 @@ export class PoolDigitalTwinEngine {
       'rgba(148, 163, 184, 0.42)'
     );
 
-    // ทางเดินผ่านราวกั้นฝั่งร้านเช่าชุด (x: -6.0)
     this.drawQuad3D(
       { x: -6.85, y: 0.016, z: 4.5 },
       { x: -5.15, y: 0.016, z: 4.5 },
@@ -1164,7 +1105,6 @@ export class PoolDigitalTwinEngine {
       'rgba(186, 230, 253, 0.65)'
     );
 
-    // ทางเดินผ่านราวกั้นฝั่ง 7/11 (x: 3.1)
     this.drawQuad3D(
       { x: 2.25, y: 0.016, z: 4.5 },
       { x: 3.95, y: 0.016, z: 4.5 },
@@ -1173,7 +1113,6 @@ export class PoolDigitalTwinEngine {
       'rgba(254, 243, 199, 0.7)'
     );
 
-    // สระว่ายน้ำหลัก (Main Pool)
     this.drawBox3D(-1.0, 0.08, -1.8, 13.4, 0.2, 8.6, '#ffffff', '#e2e8f0', '#cbd5e1');
     const waveAlpha = 0.92 + Math.sin(this.elapsed * 2.5) * 0.04;
     this.drawQuad3D(
@@ -1207,67 +1146,55 @@ export class PoolDigitalTwinEngine {
       this.ctx.stroke();
     }
 
-    // อาคาร SHOWER ROOMS
     this.drawBox3D(-11.8, 1.15, -15.2, 4.4, 2.3, 2.8, '#94a3b8', '#64748b', '#475569');
     this.drawBox3D(-12.5, 0.85, -13.75, 1.0, 1.7, 0.12, '#38bdf8', '#0284c7', '#0369a1');
     this.drawBox3D(-11.1, 0.85, -13.75, 1.0, 1.7, 0.12, '#f472b6', '#db2777', '#be185d');
 
-    // แถวตู้ล็อกเกอร์สีน้ำเงิน
     for (let i = 0; i < 6; i++) {
       const lz = -10.2 + i * 1.45;
       this.drawBox3D(-14.8, 1.05, lz, 1.35, 2.1, 1.25, '#0284c7', '#0369a1', '#1e3a8a');
     }
 
-    // ทางเข้า-ออก
     this.drawBox3D(-3.4, 0.95, 15.6, 0.35, 1.9, 0.35, '#0284c7', '#0369a1', '#1e3a8a');
     this.drawBox3D(0.4, 0.95, 15.6, 0.35, 1.9, 0.35, '#0284c7', '#0369a1', '#1e3a8a');
     this.drawBox3D(-1.5, 1.95, 15.6, 4.2, 0.35, 0.45, '#0ea5e9', '#0284c7', '#0369a1');
     this.drawBox3D(-2.3, 0.45, 15.6, 0.25, 0.9, 0.7, '#334155', '#1e293b', '#0f172a');
     this.drawBox3D(-0.7, 0.45, 15.6, 0.25, 0.9, 0.7, '#334155', '#1e293b', '#0f172a');
 
-    // จุดเช็คอิน (x: -1.5, z: 10.2)
     this.drawBox3D(-1.5, 0.55, 10.2, 4.4, 1.1, 1.3, '#0284c7', '#1e293b', '#0f172a');
     this.drawBox3D(-3.5, 1.45, 10.2, 0.22, 1.9, 0.22, '#e2e8f0', '#cbd5e1', '#94a3b8');
     this.drawBox3D(0.5, 1.45, 10.2, 0.22, 1.9, 0.22, '#e2e8f0', '#cbd5e1', '#94a3b8');
     this.drawBox3D(-1.5, 2.4, 10.2, 4.6, 0.28, 1.5, '#38bdf8', '#0284c7', '#0369a1');
     this.drawCharacter3D({ x: -1.5, y: 0, z: 9.2 }, '#0ea5e9', '#0f172a', false, false, false, false);
 
-    // ร้านเช่า-ซื้อชุดว่ายน้ำ & เคาน์เตอร์แจกสายข้อมือ RFID (x: -10.5, z: 9.2)
     this.drawBox3D(-10.5, 1.15, 9.2, 4.6, 2.3, 2.6, '#ec4899', '#1e1b4b', '#312e81');
     this.drawBox3D(-10.5, 2.45, 9.5, 5.0, 0.32, 3.2, '#f43f5e', '#db2777', '#be185d');
     this.drawBox3D(-10.5, 0.55, 11.0, 4.0, 1.1, 0.9, '#38bdf8', '#0284c7', '#0369a1');
-    // แท่นแจกสายข้อมือ RFID บนเคาน์เตอร์ร้านชุดว่ายน้ำ
     this.drawBox3D(-9.2, 1.25, 11.0, 0.55, 0.55, 0.25, '#22d3ee', '#0284c7', '#0369a1');
-    // พนักงานประจำเคาน์เตอร์ร้านเช่าชุด (ถือสายข้อมือ RFID รอแจก)
     this.drawCharacter3D({ x: -10.5, y: 0, z: 10.2 }, '#0ea5e9', '#0f172a', false, true, true, false);
 
-    // อาคาร 7-Eleven (x: 8.2, z: 10.5)
     this.drawBox3D(8.2, 1.35, 10.5, 5.4, 2.7, 3.8, '#f8fafc', '#e2e8f0', '#cbd5e1');
     this.drawBox3D(8.2, 2.45, 10.5, 5.6, 0.25, 4.0, '#16a34a', '#16a34a', '#15803d');
     this.drawBox3D(8.2, 2.7, 10.5, 5.6, 0.25, 4.0, '#f97316', '#f97316', '#ea580c');
     this.drawBox3D(8.2, 2.95, 10.5, 5.6, 0.25, 4.0, '#dc2626', '#dc2626', '#b91c1c');
     this.drawBox3D(6.6, 0.95, 12.42, 1.3, 1.9, 0.12, '#38bdf8', '#7dd3fc', '#0284c7');
 
-    // แนวรั้วกระจกกั้นโซน บังคับให้คนเดินผ่านราวกั้นรถไฟฟ้าทั้ง 2 ฝั่งเท่านั้น
-    this.drawGlassPartition3D(-15.8, 10.2, 6.0); // ซ้ายสุดข้างร้านเช่าชุด
-    this.drawGlassPartition3D(-7.52, 10.2, 1.35); // ระหว่างร้านเช่าชุด กับ ราวกั้นฝั่งเช่าชุด
-    this.drawGlassPartition3D(-4.42, 10.2, 1.45); // ระหว่างราวกั้นฝั่งเช่าชุด กับ จุดเช็คอิน
-    this.drawGlassPartition3D(1.48, 10.2, 1.55); // ระหว่างจุดเช็คอิน กับ ราวกั้นฝั่ง 7/11
-    this.drawGlassPartition3D(4.72, 10.2, 1.55); // ระหว่างราวกั้นฝั่ง 7/11 กับ 7-Eleven
-    this.drawGlassPartition3D(14.8, 10.2, 7.8); // ขวาสุดข้าง 7-Eleven
+    this.drawGlassPartition3D(-15.8, 10.2, 6.0);
+    this.drawGlassPartition3D(-7.52, 10.2, 1.35);
+    this.drawGlassPartition3D(-4.42, 10.2, 1.45);
+    this.drawGlassPartition3D(1.48, 10.2, 1.55);
+    this.drawGlassPartition3D(4.72, 10.2, 1.55);
+    this.drawGlassPartition3D(14.8, 10.2, 7.8);
 
-    // ราวกั้นแบบเดียวกับของรถไฟฟ้า (BTS/MRT Turnstile Gates) ทั้ง 2 ฝั่ง
     for (let g = 0; g < this.turnstileGates.length; g++) {
       this.drawBtsTurnstileGate3D(this.turnstileGates[g]);
     }
 
-    // ร่มชายหาดหลากสีด้านหลังสระ
     this.drawBeachUmbrella3D(-4.5, -13.5, '#ef4444', '#ffffff');
     this.drawBeachUmbrella3D(-0.8, -13.5, '#3b82f6', '#ffffff');
     this.drawBeachUmbrella3D(2.9, -13.5, '#f59e0b', '#ffffff');
     this.drawBeachUmbrella3D(6.6, -13.5, '#10b981', '#ffffff');
 
-    // ป้อม Lifeguard หรือ ไลฟ์การ์ดวิ่งรอบสระตอนฉุกเฉิน
     if (this.lifeguardEmergencyActive) {
       this.lifeguardAngle += 2.2 * dt;
       const radiusX = 8.8;
@@ -1286,7 +1213,6 @@ export class PoolDigitalTwinEngine {
       this.drawCharacter3D(this.lifeguardPos, '#ef4444', '#fef08a', false, false, false, false);
     }
 
-    // สระเด็ก & สไลเดอร์สีเหลือง
     this.drawBox3D(12.2, 0.08, 1.5, 5.4, 0.2, 4.8, '#e2e8f0', '#cbd5e1', '#94a3b8');
     this.drawQuad3D(
       { x: 9.8, y: 0.2, z: -0.6 },
@@ -1309,11 +1235,9 @@ export class PoolDigitalTwinEngine {
       this.ctx.stroke();
     }
 
-    // ร่มโต๊ะนั่งพักผ่อนข้าง 7-Eleven
     this.drawBeachUmbrella3D(5.2, 6.2, '#ec4899', '#ffffff');
     this.drawBeachUmbrella3D(8.8, 6.2, '#8b5cf6', '#ffffff');
 
-    // ต้นไม้รอบสระว่ายน้ำ
     this.drawTree3D(-16.5, -14.5);
     this.drawTree3D(-16.5, 1.5);
     this.drawTree3D(-2.0, -17.0);
@@ -1321,13 +1245,11 @@ export class PoolDigitalTwinEngine {
     this.drawTree3D(16.5, -2.5);
     this.drawTree3D(15.5, 14.5);
 
-    // ผู้ว่ายน้ำในสระ
     for (let i = 0; i < this.swimmers.length; i++) {
       const s = this.swimmers[i];
       this.drawCharacter3D({ x: s.x, y: 0.15, z: s.z }, s.color, '#0f172a', true);
     }
 
-    // NPC เดินเข้าร้าน -> หน้าเคาน์เตอร์ -> รับสายข้อมือ RFID -> สแกนที่ราวกั้น (ทีละคน) -> ลงสระว่ายน้ำ
     for (let i = 0; i < this.swimsuitNpcs.length; i++) {
       const npc = this.swimsuitNpcs[i];
       if (npc.timer < 0) continue;
@@ -1347,7 +1269,6 @@ export class PoolDigitalTwinEngine {
       );
     }
 
-    // ตัวละครผู้เล่นในโหมดเดินสำรวจ (Player Mode)
     if (this.isExploration) {
       if (this.playerWalkTarget) {
         const tgtP = this.project3D(this.playerWalkTarget.x, 0.04, this.playerWalkTarget.z);
@@ -1375,14 +1296,14 @@ export class PoolDigitalTwinEngine {
 
   public setCameraPreset(preset: string) {
     const presets: Record<string, { yaw: number; pitch: number; dist: number; look: Vec3 }> = {
-      overview: { yaw: -0.52, pitch: 0.66, dist: 39, look: { x: -1.0, y: 0, z: 2.5 } },
-      top: { yaw: 0.0, pitch: 1.42, dist: 38, look: { x: -1.0, y: 0, z: 2.0 } },
-      entrance: { yaw: -0.25, pitch: 0.58, dist: 24, look: { x: -1.5, y: 0.5, z: 12.2 } },
-      pool: { yaw: -0.45, pitch: 0.72, dist: 25, look: { x: -1.0, y: 0, z: -1.8 } },
-      locker: { yaw: -0.65, pitch: 0.68, dist: 23, look: { x: -13.0, y: 0.5, z: -8.5 } },
-      swimwear: { yaw: -0.35, pitch: 0.62, dist: 22, look: { x: -8.5, y: 0.5, z: 10.5 } },
-      restroom: { yaw: -0.65, pitch: 0.68, dist: 22, look: { x: -11.8, y: 0.8, z: -14.5 } },
-      kids: { yaw: 0.45, pitch: 0.68, dist: 23, look: { x: 12.2, y: 0.5, z: 1.5 } }
+      overview: { yaw: -0.52, pitch: 0.66, dist: 32, look: { x: -0.8, y: 0.2, z: 1.8 } },
+      top: { yaw: 0.0, pitch: 1.42, dist: 34, look: { x: -1.0, y: 0, z: 2.0 } },
+      entrance: { yaw: -0.25, pitch: 0.58, dist: 22, look: { x: -1.5, y: 0.5, z: 12.2 } },
+      pool: { yaw: -0.45, pitch: 0.72, dist: 23, look: { x: -1.0, y: 0, z: -1.8 } },
+      locker: { yaw: -0.65, pitch: 0.68, dist: 22, look: { x: -13.0, y: 0.5, z: -8.5 } },
+      swimwear: { yaw: -0.35, pitch: 0.62, dist: 21, look: { x: -8.5, y: 0.5, z: 10.5 } },
+      restroom: { yaw: -0.65, pitch: 0.68, dist: 21, look: { x: -11.8, y: 0.8, z: -14.5 } },
+      kids: { yaw: 0.45, pitch: 0.68, dist: 22, look: { x: 12.2, y: 0.5, z: 1.5 } }
     };
     const p = presets[preset] || presets.overview;
     this.targetCamYaw = p.yaw;
@@ -1430,11 +1351,14 @@ export class PoolDigitalTwinEngine {
     const wasEnabled = this.isExploration;
     this.isExploration = enabled;
     if (enabled && !wasEnabled) {
+      const isPortrait = this.canvas.height > this.canvas.width;
       this.playerPos = { x: -1.5, y: 0, z: 14.2 };
       this.playerWalkTarget = null;
-      this.targetCamDistance = 23;
-      this.targetCamPitch = 0.62;
-      this.targetCamLook = { x: this.playerPos.x, y: 0.8, z: this.playerPos.z };
+      this.targetCamDistance = isPortrait ? 31 : 24;
+      this.targetCamPitch = 0.64;
+      this.targetCamLook = isPortrait
+        ? { x: -1.0, y: 0.4, z: 4.5 }
+        : { x: this.playerPos.x, y: 0.8, z: this.playerPos.z };
     }
     if (!enabled) {
       this.playerWalkTarget = null;
@@ -1461,12 +1385,13 @@ export class PoolDigitalTwinEngine {
     const screenX = (clientX - rect.left) * this.dpr;
     const screenY = (clientY - rect.top) * this.dpr;
 
+    const effDist = this.getEffectiveCamDistance(this.camDistance);
     const ndcY = (this.centerY - screenY) / this.fov;
     const denom = this.sinP - ndcY * this.cosP;
     if (Math.abs(denom) < 0.001) return null;
 
-    const rz1 = (-ndcY * this.camDistance) / denom;
-    const rz = this.camDistance - rz1 * this.cosP;
+    const rz1 = (-ndcY * effDist) / denom;
+    const rz = effDist - rz1 * this.cosP;
     if (rz <= 1.0) return null;
 
     const scale = this.fov / rz;
@@ -1720,8 +1645,10 @@ export class PoolDigitalTwinEngine {
     this.playerInWater = inMainPool || inKidsPool;
     this.playerPos.y = this.playerInWater ? 0.12 : 0;
 
-    this.targetCamLook.x += (this.playerPos.x - this.targetCamLook.x) * 0.18;
-    this.targetCamLook.z += (this.playerPos.z - this.targetCamLook.z) * 0.18;
+    if (this.playerIsMoving) {
+      this.targetCamLook.x += (this.playerPos.x - this.targetCamLook.x) * 0.14;
+      this.targetCamLook.z += (this.playerPos.z - this.targetCamLook.z) * 0.14;
+    }
 
     let closestZone: (typeof this.hotspots3D)[number] | null = null;
     let closestDist = 3.6;
@@ -1795,8 +1722,8 @@ export class PoolDigitalTwinEngine {
       const bubbles: NpcStatusBubble[] = [];
       for (let i = 0; i < this.swimsuitNpcs.length; i++) {
         const n = this.swimsuitNpcs[i];
-        if (n.timer < 0) continue;
-        const proj = this.project3D(n.pos.x, n.pos.y + 2.1, n.pos.z);
+        if (n.timer < 0 || n.state === 'SWIMMING' || !n.statusText) continue;
+        const proj = this.project3D(n.pos.x, n.pos.y + 1.9, n.pos.z);
         bubbles.push({
           id: n.id,
           text: n.statusText,
